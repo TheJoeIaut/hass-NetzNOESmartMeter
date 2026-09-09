@@ -10,7 +10,13 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
 from .api import Smartmeter
 from .api.errors import SmartmeterConnectionError, SmartmeterLoginError
-from .const import CONF_METERING_POINTS, DOMAIN, is_meter_active
+from .const import (
+    CONF_ENERGY_COMMUNITY,
+    CONF_METERING_POINTS,
+    DOMAIN,
+    has_energy_community,
+    is_meter_active,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,14 +77,30 @@ class NetzNoeSmartmeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 elif not has_any_active:
                     errors["base"] = "not_active"
                 else:
-                    # Success - create entry
+                    # Credentials are good, ask about the energy community next
                     self.data = user_input
                     self.data[CONF_METERING_POINTS] = metering_points
 
-                    return self.async_create_entry(
-                        title="Netz NO Smartmeter", data=self.data
-                    )
+                    return await self.async_step_energy_community()
 
         return self.async_show_form(
             step_id="user", data_schema=AUTH_SCHEMA, errors=errors
         )
+
+    async def async_step_energy_community(
+        self, user_input: dict[str, Any] | None = None
+    ):
+        """Ask whether to track the energy community split."""
+        metering_points = self.data[CONF_METERING_POINTS]
+
+        if user_input is not None:
+            self.data[CONF_ENERGY_COMMUNITY] = user_input[CONF_ENERGY_COMMUNITY]
+            return self.async_create_entry(title="Netz NO Smartmeter", data=self.data)
+
+        # Suggest enabling it when the account already belongs to a community.
+        detected = any(has_energy_community(mp) for mp in metering_points)
+        schema = vol.Schema(
+            {vol.Required(CONF_ENERGY_COMMUNITY, default=detected): cv.boolean}
+        )
+
+        return self.async_show_form(step_id="energy_community", data_schema=schema)

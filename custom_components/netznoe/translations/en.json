@@ -15,6 +15,13 @@
           "username": "Username",
           "password": "Password"
         }
+      },
+      "energy_community": {
+        "title": "Energy community (Energiegemeinschaft)",
+        "description": "An energy community produces power locally, which is used before power is drawn from the public grid. Enable this to add two extra sensors per metering point: Eigendeckung (covered by the community) and Restnetzbezug (taken from the grid). The main sensor keeps reporting your full consumption.\n\nThe community split is published a while after the consumption itself. Until it arrives, Restnetzbezug matches your full consumption and is corrected automatically once the values appear.",
+        "data": {
+          "energy_community": "Track energy community usage"
+        }
       }
     }
   }

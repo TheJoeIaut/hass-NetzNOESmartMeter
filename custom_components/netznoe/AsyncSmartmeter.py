@@ -6,7 +6,7 @@ from datetime import date
 
 from homeassistant.core import HomeAssistant
 
-from .api import Smartmeter
+from .api import ConsumptionDay, Smartmeter
 from .utils import before, today
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,6 +43,14 @@ class AsyncSmartmeter:
         """Get daily consumption data asynchronously."""
         return await self.hass.async_add_executor_job(
             self.smartmeter.get_consumption_day, day, meter_id
+        )
+
+    async def get_consumption_day_series(
+        self, day: date, meter_id: str | None = None
+    ) -> ConsumptionDay:
+        """Get a day's readings including the energy community split."""
+        return await self.hass.async_add_executor_job(
+            self.smartmeter.get_consumption_day_series, day, meter_id
         )
 
     async def get_consumption_month(

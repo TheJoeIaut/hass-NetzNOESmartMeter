@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 from urllib import parse
@@ -17,6 +18,35 @@ from .errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConsumptionDay:
+    """One day of interval readings.
+
+    `metered` is the total consumption. For members of an energy community the
+    API splits that total into `self_coverage`, the share covered by the
+    community, and `grid_leftover`, the remainder drawn from the public grid.
+    That split is published later than the consumption itself, so the two
+    lists can be empty or hold None entries for intervals it is missing for.
+    """
+
+    times: list[str] = field(default_factory=list)
+    metered: list[float | None] = field(default_factory=list)
+    grid_leftover: list[float | None] = field(default_factory=list)
+    self_coverage: list[float | None] = field(default_factory=list)
+
+    def self_coverage_at(self, index: int) -> float | None:
+        """Return the community share for an interval, if it is published."""
+        if index < len(self.self_coverage):
+            return self.self_coverage[index]
+        return None
+
+    def grid_leftover_at(self, index: int) -> float | None:
+        """Return the grid share for an interval, if it is published."""
+        if index < len(self.grid_leftover):
+            return self.grid_leftover[index]
+        return None
 
 
 class Smartmeter:
@@ -212,6 +242,22 @@ class Smartmeter:
             Tuple of (peak_demand_times, metered_values)
 
         """
+        consumption = self.get_consumption_day_series(day, meter_id)
+        return (consumption.times, consumption.metered)
+
+    def get_consumption_day_series(
+        self, day: date, meter_id: str | None = None
+    ) -> ConsumptionDay:
+        """Get daily consumption data including the energy community split.
+
+        Args:
+            day: Date to get consumption for
+            meter_id: Metering point ID (uses default if None)
+
+        Returns:
+            The day's interval readings
+
+        """
         meter_id = meter_id or self._metering_point_id
         if not meter_id:
             raise SmartmeterQueryError("No metering point ID available")
@@ -228,11 +274,13 @@ class Smartmeter:
             base_entries = [r for r in response if r.get("ec_id") is None]
             response = base_entries[0] if base_entries else response[0]
         elif isinstance(response, list):
-            return ([], [])
+            return ConsumptionDay()
 
-        return (
-            response.get("peakDemandTimes", []),
-            response.get("meteredValues", []),
+        return ConsumptionDay(
+            times=response.get("peakDemandTimes") or [],
+            metered=response.get("meteredValues") or [],
+            grid_leftover=response.get("gridUsageLeftoverValues") or [],
+            self_coverage=response.get("selfCoverageValues") or [],
         )
 
     def get_consumption_month(

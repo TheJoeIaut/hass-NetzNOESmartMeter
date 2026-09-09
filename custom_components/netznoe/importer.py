@@ -13,12 +13,18 @@ from homeassistant.components.recorder.models import StatisticData, StatisticMet
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .AsyncSmartmeter import AsyncSmartmeter
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    ENERGY_COMMUNITY_RESYNC_DAYS,
+    STAT_SUFFIX_GRID,
+    STAT_SUFFIX_SELF_COVERAGE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,13 +37,14 @@ NETZNOE_TIMEZONE = ZoneInfo("Europe/Vienna")
 class Importer:
     """Import historical consumption data into Home Assistant statistics."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - the importer is configured from several sources
         self,
         hass: HomeAssistant,
         async_smartmeter: AsyncSmartmeter,
         metering_point_id: str,
         unit_of_measurement: str,
         has_ftm_meter_data: bool = True,
+        energy_community: bool = False,
     ):
         """Initialize the importer.
 
@@ -47,14 +54,27 @@ class Importer:
             metering_point_id: Metering point ID
             unit_of_measurement: Unit of measurement for statistics
             has_ftm_meter_data: True for 15-min interval meters, False for daily meters
+            energy_community: True to also import the energy community split
 
         """
         self.id = f"{DOMAIN}:{metering_point_id.lower()}"
+        self.id_self_coverage = f"{self.id}_{STAT_SUFFIX_SELF_COVERAGE}"
+        self.id_grid = f"{self.id}_{STAT_SUFFIX_GRID}"
         self.metering_point_id = metering_point_id
         self.unit_of_measurement = unit_of_measurement
         self.hass = hass
         self.async_smartmeter = async_smartmeter
         self.has_ftm_meter_data = has_ftm_meter_data
+        # The energy community split is only published for interval meters.
+        self.energy_community = energy_community and has_ftm_meter_data
+        # Running totals of the most recent import, keyed by statistic id.
+        self.last_totals: dict[str, Decimal] = {}
+
+    def statistic_ids(self) -> list[str]:
+        """Return every statistic id this importer maintains."""
+        if not self.energy_community:
+            return [self.id]
+        return [self.id, self.id_self_coverage, self.id_grid]
 
     def is_last_inserted_stat_valid(self, last_inserted_stat: dict) -> bool:
         """Check if last inserted statistics are valid."""
@@ -127,7 +147,19 @@ class Importer:
                 # Return existing sum if no new import needed
                 return Decimal(last_inserted_stat[self.id][0]["sum"])
             start, _sum = start_off_point
-            return await self._incremental_import_statistics(start, _sum)
+            totals = {self.id: _sum}
+
+            if self.energy_community:
+                # The community split for a day can arrive after that day was
+                # already imported, so recent days are read again and their
+                # statistics rewritten from the totals that preceded them.
+                resync_start = datetime.now(UTC) - timedelta(
+                    days=ENERGY_COMMUNITY_RESYNC_DAYS
+                )
+                start = min(start, resync_start)
+                totals = await self._running_sums_before(start)
+
+            return await self._incremental_import_statistics(start, totals)
 
         except TimeoutError as e:
             _LOGGER.warning("Timeout during import: %s", e)
@@ -136,38 +168,77 @@ class Importer:
             _LOGGER.exception("Error during import: %s", e)
             return None
 
-    def get_statistics_metadata(self) -> StatisticMetaData:
-        """Get statistics metadata."""
+    def get_statistics_metadata(
+        self, statistic_id: str | None = None
+    ) -> StatisticMetaData:
+        """Get statistics metadata for one of the maintained series."""
+        statistic_id = statistic_id or self.id
+        name = f"Netz NO {self.metering_point_id}"
+        if statistic_id == self.id_self_coverage:
+            name = f"{name} Eigendeckung"
+        elif statistic_id == self.id_grid:
+            name = f"{name} Restnetzbezug"
+
         return StatisticMetaData(
             source=DOMAIN,
-            statistic_id=self.id,
-            name=f"Netz NO {self.metering_point_id}",
+            statistic_id=statistic_id,
+            name=name,
             unit_of_measurement=self.unit_of_measurement,
             has_mean=False,
             has_sum=True,
         )
+
+    async def _running_sums_before(self, moment: datetime) -> dict[str, Decimal]:
+        """Return each series' cumulative sum as of just before a moment.
+
+        Re-importing a stretch of history means continuing its running totals,
+        so the last statistic written before that stretch is the anchor.
+        """
+        statistic_ids = set(self.statistic_ids())
+        rows = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            moment - timedelta(days=7),
+            moment,
+            statistic_ids,
+            "hour",
+            None,
+            {"sum"},
+        )
+
+        sums: dict[str, Decimal] = {}
+        for statistic_id in statistic_ids:
+            entries = rows.get(statistic_id) or []
+            last_sum = entries[-1].get("sum") if entries else None
+            sums[statistic_id] = (
+                Decimal(str(last_sum)) if last_sum is not None else Decimal(0)
+            )
+        return sums
 
     async def _initial_import_statistics(self) -> Decimal:
         """Perform initial import of statistics."""
         return await self._import_statistics()
 
     async def _incremental_import_statistics(
-        self, start: datetime, total_usage: Decimal
+        self, start: datetime, totals: dict[str, Decimal]
     ) -> Decimal:
         """Perform incremental import of statistics."""
-        return await self._import_statistics(start=start, total_usage=total_usage)
+        return await self._import_statistics(start=start, totals=totals)
 
     async def _import_statistics(
         self,
         start: datetime | None = None,
         end: datetime | None = None,
-        total_usage: Decimal = Decimal(0),
+        totals: dict[str, Decimal] | None = None,
     ) -> Decimal:
         """Import statistics from Netz NO API.
 
         Dispatches to the appropriate import method based on meter type.
         """
         now = datetime.now(UTC)
+        totals = dict(totals or {})
+        for statistic_id in self.statistic_ids():
+            totals.setdefault(statistic_id, Decimal(0))
 
         if start is None:
             # Default: 3 years of history
@@ -179,24 +250,25 @@ class Importer:
             raise ValueError("start datetime must be timezone-aware!")
 
         _LOGGER.debug(
-            "Importing data from %s to %s (FTM: %s)",
+            "Importing data from %s to %s (FTM: %s, energy community: %s)",
             start,
             end,
             self.has_ftm_meter_data,
+            self.energy_community,
         )
         if start > end:
             _LOGGER.warning("Start date is after end date, skipping")
-            return total_usage
+            return totals[self.id]
 
         if self.has_ftm_meter_data:
-            return await self._import_ftm_statistics(start, end, total_usage)
-        return await self._import_daily_statistics(start, end, total_usage)
+            return await self._import_ftm_statistics(start, end, totals)
+        return await self._import_daily_statistics(start, end, totals[self.id])
 
     async def _import_ftm_statistics(
         self,
         start: datetime,
         end: datetime,
-        total_usage: Decimal,
+        totals: dict[str, Decimal],
     ) -> Decimal:
         """Import FTM (15-minute interval) statistics.
 
@@ -204,16 +276,23 @@ class Importer:
         together with the corresponding timestamps. The API reports the *end* of
         each interval (e.g., 23:00 for the 22:45-23:00 interval). We aggregate to
         hourly statistics (HA requires timestamps at top of hour).
+
+        For energy community members the total is additionally split into the
+        share covered by the community and the remainder taken from the grid.
         """
-        hourly_readings = defaultdict(Decimal)
+        hourly_readings: dict[str, defaultdict[datetime, Decimal]] = {
+            statistic_id: defaultdict(Decimal) for statistic_id in self.statistic_ids()
+        }
         current_date = start.date()
         end_date = end.date()
 
         while current_date <= end_date:
             try:
-                times, values = await self.async_smartmeter.get_consumption_day(
+                consumption = await self.async_smartmeter.get_consumption_day_series(
                     current_date, self.metering_point_id
                 )
+                times = consumption.times
+                values = consumption.metered
 
                 if values:
                     if len(times) < len(values):
@@ -268,33 +347,82 @@ class Importer:
                         # Skip hours already imported (start = end of last stat)
                         if hour_start < start:
                             continue
-                        hourly_readings[hour_start] += Decimal(str(value))
+
+                        usage = Decimal(str(value))
+                        hourly_readings[self.id][hour_start] += usage
+
+                        if self.energy_community:
+                            self_covered, from_grid = self._split_energy_community(
+                                usage,
+                                consumption.self_coverage_at(i),
+                                consumption.grid_leftover_at(i),
+                            )
+                            hourly_readings[self.id_self_coverage][hour_start] += (
+                                self_covered
+                            )
+                            hourly_readings[self.id_grid][hour_start] += from_grid
 
             except Exception as e:
                 _LOGGER.debug("Could not fetch data for %s: %s", current_date, e)
 
             current_date += timedelta(days=1)
 
-        # Build statistics with hourly resolution
-        statistics = []
-        metadata = self.get_statistics_metadata()
+        for statistic_id in self.statistic_ids():
+            totals[statistic_id] = self._write_statistics(
+                statistic_id, hourly_readings[statistic_id], totals[statistic_id]
+            )
 
+        self.last_totals = dict(totals)
+        return totals[self.id]
+
+    @staticmethod
+    def _split_energy_community(
+        usage: Decimal,
+        self_coverage: float | None,
+        grid_leftover: float | None,
+    ) -> tuple[Decimal, Decimal]:
+        """Split one reading into the community share and the grid share.
+
+        The split is published later than the consumption itself. Until it
+        arrives the whole reading counts as taken from the grid, which keeps
+        the grid series equal to the total; the values are corrected on a later
+        run once the API fills them in.
+        """
+        if self_coverage is None:
+            return Decimal(0), usage
+
+        self_covered = Decimal(str(self_coverage))
+        if grid_leftover is not None:
+            return self_covered, Decimal(str(grid_leftover))
+        return self_covered, usage - self_covered
+
+    def _write_statistics(
+        self,
+        statistic_id: str,
+        hourly_readings: dict[datetime, Decimal],
+        total: Decimal,
+    ) -> Decimal:
+        """Write one series' hourly buckets and return its new running total."""
+        statistics = []
         for ts, usage in sorted(hourly_readings.items(), key=itemgetter(0)):
-            total_usage += usage
+            total += usage
             statistics.append(
-                StatisticData(start=ts, sum=float(total_usage), state=float(usage))
+                StatisticData(start=ts, sum=float(total), state=float(usage))
             )
 
         if statistics:
             _LOGGER.debug(
-                "Importing %d FTM statistics entries from %s to %s",
+                "Importing %d FTM statistics entries for %s from %s to %s",
                 len(statistics),
+                statistic_id,
                 statistics[0]["start"],
                 statistics[-1]["start"],
             )
-            async_add_external_statistics(self.hass, metadata, statistics)
+            async_add_external_statistics(
+                self.hass, self.get_statistics_metadata(statistic_id), statistics
+            )
 
-        return total_usage
+        return total
 
     async def _import_daily_statistics(
         self,

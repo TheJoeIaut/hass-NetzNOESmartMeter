@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from homeassistant import config_entries, core
 
-from .const import CONF_METERING_POINTS, DOMAIN
+from .const import CONF_ENERGY_COMMUNITY, CONF_METERING_POINTS, DOMAIN
 from .netznoe_sensor import NetzNoeSensor
 
 # Time between updating data from Netz NO (every hour)
@@ -20,9 +20,14 @@ async def async_setup_entry(
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     async_smartmeter = entry_data["client"]
     config = entry_data["config"]
+    energy_community = config.get(CONF_ENERGY_COMMUNITY, False)
 
-    sensors = [
-        NetzNoeSensor(async_smartmeter, mp)
-        for mp in config.get(CONF_METERING_POINTS, [])
-    ]
-    async_add_entities(sensors, update_before_add=False)
+    entities = []
+    for metering_point in config.get(CONF_METERING_POINTS, []):
+        sensor = NetzNoeSensor(
+            async_smartmeter, metering_point, energy_community=energy_community
+        )
+        entities.append(sensor)
+        entities.extend(sensor.create_energy_community_sensors())
+
+    async_add_entities(entities, update_before_add=False)
