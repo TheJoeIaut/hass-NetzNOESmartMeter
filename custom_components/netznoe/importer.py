@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from operator import itemgetter
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
@@ -20,6 +21,11 @@ from .AsyncSmartmeter import AsyncSmartmeter
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# The Netz NO API returns interval timestamps without a UTC offset. They are
+# always in the grid's own local time (Austria), regardless of the Home
+# Assistant instance's configured time zone.
+NETZNOE_TIMEZONE = ZoneInfo("Europe/Vienna")
 
 
 class Importer:
@@ -79,8 +85,8 @@ class Importer:
             )
             return None
 
-        # Don't query if less than 24h since last update
-        min_wait = timedelta(hours=24)
+        # Don't query if less than 1h since last update
+        min_wait = timedelta(hours=1)
         delta_t = datetime.now(timezone.utc) - start.replace(microsecond=0)
         if delta_t <= min_wait:
             _LOGGER.debug(
@@ -193,8 +199,10 @@ class Importer:
     ) -> Decimal:
         """Import FTM (15-minute interval) statistics.
 
-        Each day returns individual readings (e.g., 96 values for 15-min intervals).
-        We aggregate to hourly statistics (HA requires timestamps at top of hour).
+        Each day returns individual readings (e.g., 96 values for 15-min intervals)
+        together with the corresponding timestamps. The API reports the *end* of
+        each interval (e.g., 23:00 for the 22:45-23:00 interval). We aggregate to
+        hourly statistics (HA requires timestamps at top of hour).
         """
         hourly_readings = defaultdict(Decimal)
         current_date = start.date()
@@ -207,25 +215,32 @@ class Importer:
                 )
 
                 if values:
-                    # Calculate interval based on number of readings
-                    # e.g., 96 values = 15 min, 24 values = 60 min, 1 value = 1440 min
-                    interval_minutes = (24 * 60) // len(values) if len(values) > 0 else 1440
-
-                    # Create a datetime for the start of the day
-                    day_start = datetime.combine(
-                        current_date, datetime.min.time(), tzinfo=timezone.utc
-                    )
-
-                    # Aggregate readings to hourly buckets
+                    # Aggregate readings to hourly buckets using the actual
+                    # timestamps reported by the API.
                     for i, value in enumerate(values):
-                        if value is not None:
-                            reading_time = day_start + timedelta(minutes=i * interval_minutes)
-                            # Round down to the start of the hour
-                            hour_start = reading_time.replace(minute=0, second=0, microsecond=0)
-                            # Skip hours already imported (start = end of last stat)
-                            if hour_start < start:
-                                continue
-                            hourly_readings[hour_start] += Decimal(str(value))
+                        if value is None or i >= len(times):
+                            continue
+
+                        reading_time = dt_util.parse_datetime(times[i])
+                        if reading_time is None:
+                            continue
+                        if reading_time.tzinfo is None:
+                            # The API reports naive timestamps in Austria local
+                            # time, not UTC - localize before converting so DST
+                            # offsets (CET/CEST) are applied correctly.
+                            reading_time = reading_time.replace(tzinfo=NETZNOE_TIMEZONE)
+                        reading_time = dt_util.as_utc(reading_time)
+
+                        # API time is the end of the interval; subtract 1 minute
+                        # before flooring to the hour so the reading is attributed
+                        # to the hour it actually occurred in.
+                        hour_start = (reading_time - timedelta(minutes=1)).replace(
+                            minute=0, second=0, microsecond=0
+                        )
+                        # Skip hours already imported (start = end of last stat)
+                        if hour_start < start:
+                            continue
+                        hourly_readings[hour_start] += Decimal(str(value))
 
             except Exception as e:
                 _LOGGER.debug("Could not fetch data for %s: %s", current_date, e)
