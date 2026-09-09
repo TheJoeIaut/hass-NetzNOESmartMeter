@@ -1,7 +1,9 @@
 # NetzNÖ Smartmeter Integration for Home Assistant
-![Hassfest](https://github.com/TobiKr/hass-NetzNOESmartMeter/actions/workflows/hassfest.yml/badge.svg)
-![Validate](https://github.com/TobiKr/hass-NetzNOESmartMeter/actions/workflows/validate.yml/badge.svg)
-![Release](https://github.com/TobiKr/hass-NetzNOESmartMeter/actions/workflows/release.yml/badge.svg)
+
+![Validate](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/validate.yml/badge.svg)
+![Lint](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/lint.yml/badge.svg)
+![Test](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/test.yml/badge.svg)
+![Release](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/release.yml/badge.svg)
 
 ## About
 
@@ -11,9 +13,44 @@ providing information about a registered [NetzNÖ Smartmeter](https://www.netz-n
 The integration syncs all consumption data in Home Assistant, which allows a hourly view on consumption data in Home Assistant:
 ![Screenshot of the energy dashboard, showing hourly consumption measured by a NetzNÖ SmartMeter](/docs/netznoe-energyusage.png)
 
+## Energiegemeinschaft (energy community)
+
+An Energiegemeinschaft produces power locally. That power is consumed first,
+and only what it cannot cover is taken from the public grid. The NetzNÖ API
+reports this split for every 15 minute interval, and the integration can track
+it as two extra sensors per metering point:
+
+| Sensor | Meaning |
+| --- | --- |
+| `Smartmeter <id>` | Your full consumption. Unchanged, whether or not the option is on. |
+| `Smartmeter <id> Eigendeckung` | The share covered by the energy community. |
+| `Smartmeter <id> Restnetzbezug` | The remainder drawn from the public grid. |
+
+Eigendeckung and Restnetzbezug always add up to the full consumption, so the
+main sensor stays the single source of truth for how much you used.
+
+### The split arrives late
+
+NetzNÖ publishes the split some time after the consumption itself. Until it
+appears for a given interval, that interval counts entirely as grid usage, so
+**Restnetzbezug shows the same values as the full sensor**. Once the values are
+published, the previous day is read again and its statistics are rewritten, at
+which point Eigendeckung fills in and Restnetzbezug drops to the grid-only
+share. Nothing needs to be done by hand.
+
+Because the split is only published for interval (15 minute) meters, the option
+has no effect on meters that report a single value per day.
+
 ## Acknowledgments
 
-This integration is based on the excellent [Wiener Netze Smartmeter](https://github.com/DarwinsBuddy/WienerNetzeSmartmeter) integration by [DarwinsBuddy](https://github.com/DarwinsBuddy) and contributors. We are grateful for their work which served as the foundation for this Netz NÖ adaptation.
+This integration was created and is maintained by
+[TobiKr](https://github.com/TobiKr) at
+[TobiKr/hass-NetzNOESmartMeter](https://github.com/TobiKr/hass-NetzNOESmartMeter).
+This repository is a fork; all of the original work is theirs.
+
+It in turn builds on the excellent [Wiener Netze Smartmeter](https://github.com/DarwinsBuddy/WienerNetzeSmartmeter)
+integration by [DarwinsBuddy](https://github.com/DarwinsBuddy) and contributors,
+which served as the foundation for the Netz NÖ adaptation.
 
 ## Installation
 
@@ -37,7 +74,48 @@ After successful configuration you can add sensors to your favourite dashboard, 
 1. Navigate to Settings > Devices & Services > Add Integration
 2. Search for "NetzNÖ" and add the integration
 3. Enter your NetzNÖ SmartMeter Portal credentials and confirm
-4. Adding the SmartMeter can take a couple of minutes as it syncs all existing data
+4. Choose whether to track an Energiegemeinschaft. The box is ticked for you
+   when your account already belongs to one; leave it unticked if you only want
+   total consumption
+5. Adding the SmartMeter can take a couple of minutes as it syncs all existing data
+
+To change the Energiegemeinschaft setting later, open the integration and press
+**Configure**. The two extra sensors appear or disappear right away, and the
+statistics already collected are kept either way.
 
 ### Manual
 See [Example configuration files](example/configuration.yaml)
+
+## Changes in this fork
+
+- **Fixed a timezone offset in the statistics import.** The importer ignored the
+  timestamps the API returns and rebuilt them from the reading's position in the
+  day, treating them as UTC. The API reports them in Austrian local time, so
+  every reading landed one or two hours off in the energy dashboard depending on
+  daylight saving time. It now uses the reported timestamps and localizes them,
+  including the repeated hour when the clock goes back in autumn. Readings are
+  also attributed to the hour they actually cover, since the API timestamps mark
+  the *end* of an interval.
+- **Added Energiegemeinschaft support**, described above.
+- **Sync every hour instead of once a day.** The importer refused to query again
+  until 24 hours had passed, which left near real time devices such as a
+  Wallbox a day behind.
+- **Recover from a lost session during long imports.** A full history import can
+  outlive its session; every remaining day then failed silently and the run
+  finished having written nothing, only to start the same doomed import again an
+  hour later. Authentication failures now log back in and retry, and an import
+  that could not read everything says so.
+
+## Development
+
+The repository follows the [integration_blueprint](https://github.com/ludeeus/integration_blueprint)
+layout. Open it in VS Code and reopen in the dev container, then:
+
+- `scripts/develop` starts a Home Assistant instance on port 8123 with this
+  component loaded, configured by [`config/configuration.yaml`](config/configuration.yaml)
+- `scripts/lint` formats and lints with ruff
+- `pytest` runs the test suite
+
+Note that the API reports its timestamps in Austrian local time, so the
+development configuration sets `time_zone: Europe/Vienna`. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for details.
