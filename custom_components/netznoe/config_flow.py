@@ -1,5 +1,7 @@
 """Config flow for Netz NO Smartmeter integration."""
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -7,6 +9,7 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import callback
 
 from .api import Smartmeter
 from .api.errors import SmartmeterConnectionError, SmartmeterLoginError
@@ -30,6 +33,14 @@ class NetzNoeSmartmeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 2
     data: dict[str, Any] | None = None
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,  # noqa: ARG004
+    ) -> NetzNoeSmartmeterOptionsFlow:
+        """Return the options flow for an existing entry."""
+        return NetzNoeSmartmeterOptionsFlow()
 
     async def validate_auth(self, username: str, password: str) -> dict:
         """Validate credentials and return metering points.
@@ -104,3 +115,22 @@ class NetzNoeSmartmeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
         return self.async_show_form(step_id="energy_community", data_schema=schema)
+
+
+class NetzNoeSmartmeterOptionsFlow(config_entries.OptionsFlow):
+    """Let an existing entry turn energy community tracking on or off."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        """Show and store the energy community option."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        entry = self.config_entry
+        current = entry.options.get(
+            CONF_ENERGY_COMMUNITY, entry.data.get(CONF_ENERGY_COMMUNITY, False)
+        )
+        schema = vol.Schema(
+            {vol.Required(CONF_ENERGY_COMMUNITY, default=current): cv.boolean}
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema)

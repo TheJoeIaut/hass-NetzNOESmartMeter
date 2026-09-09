@@ -20,7 +20,7 @@ async def async_setup_entry(
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     async_smartmeter = entry_data["client"]
     config = entry_data["config"]
-    energy_community = config.get(CONF_ENERGY_COMMUNITY, False)
+    energy_community = entry_data[CONF_ENERGY_COMMUNITY]
 
     entities = []
     for metering_point in config.get(CONF_METERING_POINTS, []):

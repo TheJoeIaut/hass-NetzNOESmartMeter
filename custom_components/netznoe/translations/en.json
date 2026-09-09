@@ -24,5 +24,16 @@
         }
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Energy community (Energiegemeinschaft)",
+        "description": "Enable this to add two extra sensors per metering point: Eigendeckung (covered by the community) and Restnetzbezug (taken from the grid). The main sensor keeps reporting your full consumption.\n\nTurning this off removes the two sensors; the statistics they collected are kept.",
+        "data": {
+          "energy_community": "Track energy community usage"
+        }
+      }
+    }
   }
 }

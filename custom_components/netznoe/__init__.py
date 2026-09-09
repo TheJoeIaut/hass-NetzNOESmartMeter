@@ -9,7 +9,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from .api import Smartmeter
 from .api.errors import SmartmeterConnectionError, SmartmeterLoginError
 from .AsyncSmartmeter import AsyncSmartmeter
-from .const import DOMAIN
+from .const import CONF_ENERGY_COMMUNITY, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,11 +37,25 @@ async def async_setup_entry(
     hass.data[DOMAIN][entry.entry_id] = {
         "config": entry.data,
         "client": async_smartmeter,
+        # Options win over the value picked during setup, so the energy
+        # community can be turned on or off without adding the entry again.
+        CONF_ENERGY_COMMUNITY: entry.options.get(
+            CONF_ENERGY_COMMUNITY, entry.data.get(CONF_ENERGY_COMMUNITY, False)
+        ),
     }
+
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+async def async_reload_entry(
+    hass: core.HomeAssistant, entry: config_entries.ConfigEntry
+) -> None:
+    """Reload the entry so changed options take effect."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(
