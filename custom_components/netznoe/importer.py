@@ -79,8 +79,8 @@ class Importer:
             )
             return None
 
-        # Don't query if less than 24h since last update
-        min_wait = timedelta(hours=24)
+        # Don't query if less than 1h since last update
+        min_wait = timedelta(hours=1)
         delta_t = datetime.now(timezone.utc) - start.replace(microsecond=0)
         if delta_t <= min_wait:
             _LOGGER.debug(
@@ -193,8 +193,13 @@ class Importer:
     ) -> Decimal:
         """Import FTM (15-minute interval) statistics.
 
-        Each day returns individual readings (e.g., 96 values for 15-min intervals).
-        We aggregate to hourly statistics (HA requires timestamps at top of hour).
+        Each day returns individual readings (e.g., 96 values for 15-min intervals)
+        together with the timestamp of each one. We aggregate to hourly statistics
+        (HA requires timestamps at top of hour).
+
+        The API's timestamps carry no UTC offset but are UTC, and each marks the
+        *end* of its interval. A day's readings therefore run from 22:15 on the
+        previous day through 22:00 on the day itself.
         """
         hourly_readings = defaultdict(Decimal)
         current_date = start.date()
@@ -207,25 +212,41 @@ class Importer:
                 )
 
                 if values:
-                    # Calculate interval based on number of readings
-                    # e.g., 96 values = 15 min, 24 values = 60 min, 1 value = 1440 min
-                    interval_minutes = (24 * 60) // len(values) if len(values) > 0 else 1440
+                    if len(times) < len(values):
+                        _LOGGER.warning(
+                            "Netz NO returned %d values but only %d timestamps for %s, "
+                            "skipping the surplus readings",
+                            len(values),
+                            len(times),
+                            current_date,
+                        )
 
-                    # Create a datetime for the start of the day
-                    day_start = datetime.combine(
-                        current_date, datetime.min.time(), tzinfo=timezone.utc
-                    )
-
-                    # Aggregate readings to hourly buckets
+                    # Aggregate readings to hourly buckets, using the timestamp
+                    # the API reports for each reading rather than assuming the
+                    # day starts at midnight UTC.
                     for i, value in enumerate(values):
-                        if value is not None:
-                            reading_time = day_start + timedelta(minutes=i * interval_minutes)
-                            # Round down to the start of the hour
-                            hour_start = reading_time.replace(minute=0, second=0, microsecond=0)
-                            # Skip hours already imported (start = end of last stat)
-                            if hour_start < start:
-                                continue
-                            hourly_readings[hour_start] += Decimal(str(value))
+                        if i >= len(times):
+                            break
+                        if value is None:
+                            continue
+
+                        reading_time = dt_util.parse_datetime(times[i])
+                        if reading_time is None:
+                            continue
+                        if reading_time.tzinfo is None:
+                            # The timestamps carry no offset and are UTC.
+                            reading_time = reading_time.replace(tzinfo=timezone.utc)
+
+                        # The timestamp is the end of the interval, so step back
+                        # a minute before rounding down: a reading stamped 23:00
+                        # covers 22:45-23:00 and belongs to the 22:00 hour.
+                        hour_start = (reading_time - timedelta(minutes=1)).replace(
+                            minute=0, second=0, microsecond=0
+                        )
+                        # Skip hours already imported (start = end of last stat)
+                        if hour_start < start:
+                            continue
+                        hourly_readings[hour_start] += Decimal(str(value))
 
             except Exception as e:
                 _LOGGER.debug("Could not fetch data for %s: %s", current_date, e)
