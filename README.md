@@ -31,6 +31,18 @@ it as two extra sensors per metering point:
 Eigendeckung and Restnetzbezug always add up to the full consumption, so the
 main sensor stays the single source of truth for how much you used.
 
+With both added to the energy dashboard, each day is split into the share the
+community covered and the share that came from the grid:
+
+![Energy dashboard with the Energiegemeinschaft split, showing Eigendeckung stacked under Restnetzbezug](/docs/netznoe-energiegemeinschaft.png)
+
+Add **Eigendeckung and Restnetzbezug**, or the total on its own, but not all
+three: the two add up to the total, so using all of them counts your
+consumption twice. Pick the entries named `Netz NO <id> …`, which are the
+statistics the integration imports, rather than the sensor entities of the same
+name; the sensors only start collecting once they are created, while the
+statistics carry the imported history.
+
 ### The split arrives late
 
 NetzNÖ publishes the split some time after the consumption itself. Until it
