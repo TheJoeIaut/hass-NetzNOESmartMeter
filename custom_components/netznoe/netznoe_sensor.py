@@ -1,8 +1,9 @@
 """Netz NO Smartmeter sensor entity."""
+
 import asyncio
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -27,18 +28,20 @@ class NetzNoeSensor(SensorEntity):
         async_smartmeter: AsyncSmartmeter,
         metering_point_data: dict,
     ) -> None:
-        """Initialize the sensor.
+        """
+        Initialize the sensor.
 
         Args:
             async_smartmeter: Shared async smartmeter client
             metering_point_data: Full metering point dict from the API
+
         """
         super().__init__()
         self.async_smartmeter = async_smartmeter
         self.metering_point_id: str = metering_point_data["meteringPointId"]
         self.has_ftm_meter_data: bool = metering_point_data.get("hasFtmMeterData", True)
         self._is_meter_active: bool = is_meter_active(metering_point_data)
-        self._smart_meter_type: Optional[str] = metering_point_data.get("smartMeterType")
+        self._smart_meter_type: str | None = metering_point_data.get("smartMeterType")
 
         # Sensor attributes
         self._attr_native_value: float | None = None
@@ -50,7 +53,7 @@ class NetzNoeSensor(SensorEntity):
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
         self._available: bool = True
-        self._last_update: Optional[str] = None
+        self._last_update: str | None = None
         self._import_task: asyncio.Task | None = None
 
     @property
@@ -84,9 +87,7 @@ class NetzNoeSensor(SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
-        self._import_task = self.hass.async_create_task(
-            self._async_background_update()
-        )
+        self._import_task = self.hass.async_create_task(self._async_background_update())
 
     async def _async_background_update(self) -> None:
         """Perform the first update as a background task."""

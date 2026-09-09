@@ -1,8 +1,8 @@
 """Async wrapper for Netz NO Smartmeter API."""
+
 import asyncio
 import logging
 from datetime import date
-from typing import List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
 
@@ -16,11 +16,13 @@ class AsyncSmartmeter:
     """Async wrapper for Netz NO Smartmeter synchronous API."""
 
     def __init__(self, hass: HomeAssistant, smartmeter: Smartmeter):
-        """Initialize the async wrapper.
+        """
+        Initialize the async wrapper.
 
         Args:
             hass: Home Assistant instance
             smartmeter: Smartmeter client instance
+
         """
         self.hass = hass
         self.smartmeter = smartmeter
@@ -37,33 +39,34 @@ class AsyncSmartmeter:
             await self.login()
 
     async def get_consumption_day(
-        self, day: date, meter_id: Optional[str] = None
-    ) -> Tuple[List[str], List[float]]:
+        self, day: date, meter_id: str | None = None
+    ) -> tuple[list[str], list[float]]:
         """Get daily consumption data asynchronously."""
         return await self.hass.async_add_executor_job(
             self.smartmeter.get_consumption_day, day, meter_id
         )
 
     async def get_consumption_month(
-        self, year: int, month: int, meter_id: Optional[str] = None
-    ) -> Tuple[List[str], List[float]]:
+        self, year: int, month: int, meter_id: str | None = None
+    ) -> tuple[list[str], list[float]]:
         """Get monthly consumption data asynchronously."""
         return await self.hass.async_add_executor_job(
             self.smartmeter.get_consumption_month, year, month, meter_id
         )
 
     async def get_consumption_year(
-        self, year: int, meter_id: Optional[str] = None
-    ) -> Tuple[List[str], List[float]]:
+        self, year: int, meter_id: str | None = None
+    ) -> tuple[list[str], list[float]]:
         """Get yearly consumption data asynchronously."""
         return await self.hass.async_add_executor_job(
             self.smartmeter.get_consumption_year, year, meter_id
         )
 
     async def get_latest_meter_reading(
-        self, meter_id: Optional[str] = None, has_ftm_meter_data: bool = True
-    ) -> Optional[float]:
-        """Get the latest meter reading.
+        self, meter_id: str | None = None, has_ftm_meter_data: bool = True
+    ) -> float | None:
+        """
+        Get the latest meter reading.
 
         For FTM meters: tries yesterday first, then day before yesterday.
         For daily meters: fetches current month and returns last non-null value.
@@ -73,16 +76,22 @@ class AsyncSmartmeter:
             for days_ago in [1, 2]:
                 try:
                     day = before(today(), days_ago).date()
-                    _LOGGER.debug("Fetching consumption for day: %s, meter: %s", day, meter_id)
+                    _LOGGER.debug(
+                        "Fetching consumption for day: %s, meter: %s", day, meter_id
+                    )
                     times, values = await self.get_consumption_day(day, meter_id)
-                    _LOGGER.debug("Consumption response - times: %s, values: %s", times, values)
+                    _LOGGER.debug(
+                        "Consumption response - times: %s, values: %s", times, values
+                    )
                     if values:
                         # Sum all metered values for the day (values are already in kWh)
                         total = sum(v for v in values if v is not None)
                         _LOGGER.debug("Daily total (kWh): %s", total)
                         return total
                 except Exception as e:
-                    _LOGGER.warning("Could not get reading for %s days ago: %s", days_ago, e)
+                    _LOGGER.warning(
+                        "Could not get reading for %s days ago: %s", days_ago, e
+                    )
         else:
             # Daily meter: fetch current month and return last non-null value
             today_date = date.today()

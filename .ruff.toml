@@ -13,6 +13,52 @@ ignore = [
     "D212", # multi-line-summary-first-line (incompatible with formatter)
     "COM812", # incompatible with formatter
     "ISC001", # incompatible with formatter
+
+    # Pre-existing debt in this repository. These were never enforced before
+    # ruff was adopted, so they are silenced to keep CI green rather than
+    # bundling a repository-wide rewrite into the tooling change. Drop entries
+    # from this list as the corresponding code is cleaned up.
+    "ANN001", # missing-type-function-argument
+    "ANN002", # missing-type-args
+    "ANN201", # missing-return-type-undocumented-public-function
+    "ANN202", # missing-return-type-private-function
+    "ANN204", # missing-return-type-special-method
+    "BLE001", # blind-except
+    "D100", # undocumented-public-module
+    "D103", # undocumented-public-function
+    "D200", # unnecessary-multiline-docstring
+    "D205", # missing-blank-line-after-summary
+    "D400", # missing-trailing-period
+    "D401", # non-imperative-mood
+    "D415", # missing-terminal-punctuation
+    "DTZ005", # call-datetime-now-without-tzinfo
+    "DTZ011", # call-date-today
+    "E501", # line-too-long
+    "EM101", # raw-string-in-exception
+    "EM102", # f-string-in-exception
+    "EXE002", # shebang-missing-executable-file (git does not track +x on Windows)
+    "FBT001", # boolean-type-hint-positional-argument
+    "FBT002", # boolean-default-value-positional-argument
+    "FBT003", # boolean-positional-value-in-call
+    "G004", # logging-f-string
+    "INP001", # implicit-namespace-package (manage/ and utils/ are loose scripts)
+    "LOG015", # root-logger-call
+    "N999", # invalid-module-name (AsyncSmartmeter.py)
+    "PLR0912", # too-many-branches
+    "PLR2004", # magic-value-comparison
+    "PTH109", # os-getcwd
+    "PTH123", # builtin-open
+    "RUF059", # unused-unpacked-variable
+    "S110", # try-except-pass
+    "S608", # hardcoded-sql-expression
+    "SIM105", # suppressible-exception
+    "TC001", # typing-only-first-party-import
+    "TC002", # typing-only-third-party-import
+    "TC003", # typing-only-standard-library-import
+    "TRY003", # raise-vanilla-args
+    "TRY300", # try-consider-else
+    "TRY400", # error-instead-of-exception
+    "TRY401", # verbose-log-message
 ]
 
 [lint.flake8-pytest-style]

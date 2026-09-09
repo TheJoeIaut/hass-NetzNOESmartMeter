@@ -1,7 +1,8 @@
 """Netz NO Smartmeter API Client."""
+
 import logging
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib import parse
 
 import requests
@@ -20,11 +21,13 @@ class Smartmeter:
     """Netz NO Smartmeter client."""
 
     def __init__(self, username: str, password: str):
-        """Initialize the Smartmeter API client.
+        """
+        Initialize the Smartmeter API client.
 
         Args:
             username: Username for Netz NO portal
             password: Password for Netz NO portal
+
         """
         self.username = username
         self.password = password
@@ -32,12 +35,12 @@ class Smartmeter:
         self._is_authenticated = False
 
         # Account info from API
-        self._account_id: Optional[str] = None
-        self._metering_point_id: Optional[str] = None
+        self._account_id: str | None = None
+        self._metering_point_id: str | None = None
         self._has_smart_meter: bool = False
         self._has_communicative: bool = False
         self._has_active: bool = False
-        self._metering_points_cache: List[Dict[str, Any]] = []
+        self._metering_points_cache: list[dict[str, Any]] = []
 
     def reset(self):
         """Reset session and authentication state."""
@@ -63,8 +66,9 @@ class Smartmeter:
         except requests.exceptions.RequestException:
             return False
 
-    def login(self) -> "Smartmeter":
-        """Authenticate with Netz NO API.
+    def login(self) -> Smartmeter:
+        """
+        Authenticate with Netz NO API.
 
         Returns:
             Self for method chaining
@@ -72,6 +76,7 @@ class Smartmeter:
         Raises:
             SmartmeterLoginError: If authentication fails
             SmartmeterConnectionError: If connection fails
+
         """
         if self._is_authenticated and self._validate_session():
             return self
@@ -83,9 +88,7 @@ class Smartmeter:
             )
         except requests.exceptions.RequestException as e:
             logger.error("Connection error during login: %s", e)
-            raise SmartmeterConnectionError(
-                "Could not connect to Netz NO API"
-            ) from e
+            raise SmartmeterConnectionError("Could not connect to Netz NO API") from e
 
         logger.debug("Login response status: %s", response.status_code)
         logger.debug("Login response headers: %s", dict(response.headers))
@@ -123,10 +126,11 @@ class Smartmeter:
         self,
         endpoint: str,
         method: str = "GET",
-        query: Optional[Dict[str, Any]] = None,
+        query: dict[str, Any] | None = None,
         timeout: float = 60.0,
     ) -> Any:
-        """Make API call to Netz NO endpoint.
+        """
+        Make API call to Netz NO endpoint.
 
         Args:
             endpoint: API endpoint (relative to BASE_URL)
@@ -140,11 +144,10 @@ class Smartmeter:
         Raises:
             SmartmeterConnectionError: If request fails
             SmartmeterQueryError: If response is invalid
+
         """
         if not self._is_authenticated:
-            raise SmartmeterConnectionError(
-                "Not authenticated. Call login() first."
-            )
+            raise SmartmeterConnectionError("Not authenticated. Call login() first.")
 
         url = parse.urljoin(const.BASE_URL, endpoint)
 
@@ -164,28 +167,32 @@ class Smartmeter:
             raise SmartmeterConnectionError(f"Request failed: {e}") from e
 
     @property
-    def account_id(self) -> Optional[str]:
+    def account_id(self) -> str | None:
         """Return the account ID."""
         return self._account_id
 
     @property
-    def metering_point_id(self) -> Optional[str]:
+    def metering_point_id(self) -> str | None:
         """Return the metering point ID."""
         return self._metering_point_id
 
-    def get_metering_points(self) -> List[Dict[str, Any]]:
-        """Get all metering points for the account.
+    def get_metering_points(self) -> list[dict[str, Any]]:
+        """
+        Get all metering points for the account.
 
         Returns:
             List of metering point dictionaries
+
         """
         return self._metering_points_cache
 
-    def get_account_info(self) -> Dict[str, Any]:
-        """Get account information.
+    def get_account_info(self) -> dict[str, Any]:
+        """
+        Get account information.
 
         Returns:
             Dictionary with account info
+
         """
         return {
             "accountId": self._account_id,
@@ -196,9 +203,10 @@ class Smartmeter:
         }
 
     def get_consumption_day(
-        self, day: date, meter_id: Optional[str] = None
-    ) -> Tuple[List[str], List[float]]:
-        """Get daily consumption data.
+        self, day: date, meter_id: str | None = None
+    ) -> tuple[list[str], list[float]]:
+        """
+        Get daily consumption data.
 
         Args:
             day: Date to get consumption for
@@ -206,6 +214,7 @@ class Smartmeter:
 
         Returns:
             Tuple of (peak_demand_times, metered_values)
+
         """
         meter_id = meter_id or self._metering_point_id
         if not meter_id:
@@ -231,9 +240,10 @@ class Smartmeter:
         )
 
     def get_consumption_month(
-        self, year: int, month: int, meter_id: Optional[str] = None
-    ) -> Tuple[List[str], List[float]]:
-        """Get monthly consumption data.
+        self, year: int, month: int, meter_id: str | None = None
+    ) -> tuple[list[str], list[float]]:
+        """
+        Get monthly consumption data.
 
         Args:
             year: Year
@@ -242,6 +252,7 @@ class Smartmeter:
 
         Returns:
             Tuple of (peak_demand_times, metered_values)
+
         """
         meter_id = meter_id or self._metering_point_id
         if not meter_id:
@@ -266,9 +277,10 @@ class Smartmeter:
         )
 
     def get_consumption_year(
-        self, year: int, meter_id: Optional[str] = None
-    ) -> Tuple[List[str], List[float]]:
-        """Get yearly consumption data.
+        self, year: int, meter_id: str | None = None
+    ) -> tuple[list[str], list[float]]:
+        """
+        Get yearly consumption data.
 
         Args:
             year: Year
@@ -276,6 +288,7 @@ class Smartmeter:
 
         Returns:
             Tuple of (peak_demand_times, values)
+
         """
         meter_id = meter_id or self._metering_point_id
         if not meter_id:
@@ -300,10 +313,11 @@ class Smartmeter:
     def get_historical_consumption(
         self,
         start_date: date,
-        end_date: Optional[date] = None,
-        meter_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Get historical consumption data day by day.
+        end_date: date | None = None,
+        meter_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get historical consumption data day by day.
 
         This fetches daily consumption for each day in the range.
 
@@ -314,6 +328,7 @@ class Smartmeter:
 
         Returns:
             List of daily consumption records
+
         """
         if end_date is None:
             end_date = date.today()

@@ -1,4 +1,5 @@
 """Set up the Netz NO Smartmeter integration."""
+
 import logging
 
 from homeassistant import config_entries, core
@@ -65,9 +66,7 @@ async def async_migrate_entry(
         new_data = {**config_entry.data}
         new_data.pop("account_info", None)
 
-        hass.config_entries.async_update_entry(
-            config_entry, data=new_data, version=2
-        )
+        hass.config_entries.async_update_entry(config_entry, data=new_data, version=2)
         _LOGGER.info("Migration to version 2 successful")
 
     return True

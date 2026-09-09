@@ -1,22 +1,24 @@
 """
 Utility functions and convenience methods to avoid boilerplate
 """
+
 from __future__ import annotations
-from functools import reduce
-from datetime import timezone, timedelta, datetime
+
 import logging
+from datetime import datetime, timedelta, timezone
+from functools import reduce
 
 
 def today(tz: None | timezone = None) -> datetime:
     """
-    today's timestamp (start of day)
+    Today's timestamp (start of day)
     """
     return datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def before(timestamp=None, days=1) -> datetime:
     """
-    subtract {days} days from given datetime (default: 1)
+    Subtract {days} days from given datetime (default: 1)
     """
     if timestamp is None:
         timestamp = today()
@@ -25,7 +27,7 @@ def before(timestamp=None, days=1) -> datetime:
 
 def strint(string: str) -> int | None:
     """
-    convenience function for easily convert None-able str to in
+    Convenience function for easily convert None-able str to in
     """
     if string is not None and string.isdigit():
         return int(string)
@@ -34,19 +36,18 @@ def strint(string: str) -> int | None:
 
 def is_valid_access(data: list | dict, accessor: str | int) -> bool:
     """
-    convenience function for double-checking if attribute of list or dict can be accessed
+    Convenience function for double-checking if attribute of list or dict can be accessed
     """
     if isinstance(accessor, int) and isinstance(data, list):
         return accessor < len(data)
     if isinstance(accessor, str) and isinstance(data, dict):
         return accessor in data
-    else:
-        return False
+    return False
 
 
 def dict_path(path: str, dictionary: dict) -> str | None:
     """
-    convenience function for accessing nested attributes within a dict
+    Convenience function for accessing nested attributes within a dict
     """
     try:
         return reduce(
@@ -71,7 +72,7 @@ def safeget(dct, *keys, default=None):
 
 
 def translate_dict(
-        dictionary: dict, attrs_list: list[tuple[str, str]]
+    dictionary: dict, attrs_list: list[tuple[str, str]]
 ) -> dict[str, str]:
     """
     Given a response dictionary and an attribute mapping (with nested accessors separated by '.')

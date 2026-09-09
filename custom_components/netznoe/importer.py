@@ -1,11 +1,11 @@
 """Historical data importer for Netz NO Smartmeter."""
+
 import calendar
 import logging
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from operator import itemgetter
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
@@ -39,7 +39,8 @@ class Importer:
         unit_of_measurement: str,
         has_ftm_meter_data: bool = True,
     ):
-        """Initialize the importer.
+        """
+        Initialize the importer.
 
         Args:
             hass: Home Assistant instance
@@ -47,6 +48,7 @@ class Importer:
             metering_point_id: Metering point ID
             unit_of_measurement: Unit of measurement for statistics
             has_ftm_meter_data: True for 15-min interval meters, False for daily meters
+
         """
         self.id = f"{DOMAIN}:{metering_point_id.lower()}"
         self.metering_point_id = metering_point_id
@@ -66,7 +68,7 @@ class Importer:
 
     def prepare_start_off_point(
         self, last_inserted_stat: dict
-    ) -> Optional[tuple[datetime, Decimal]]:
+    ) -> tuple[datetime, Decimal] | None:
         """Prepare starting point for incremental import."""
         _sum = Decimal(last_inserted_stat[self.id][0]["sum"])
         start = last_inserted_stat[self.id][0]["end"]
@@ -87,7 +89,7 @@ class Importer:
 
         # Don't query if less than 1h since last update
         min_wait = timedelta(hours=1)
-        delta_t = datetime.now(timezone.utc) - start.replace(microsecond=0)
+        delta_t = datetime.now(UTC) - start.replace(microsecond=0)
         if delta_t <= min_wait:
             _LOGGER.debug(
                 "Skipping API query - last update is recent. Next update in %s",
@@ -97,11 +99,13 @@ class Importer:
 
         return start, _sum
 
-    async def async_import(self) -> Optional[Decimal]:
-        """Import historical data.
+    async def async_import(self) -> Decimal | None:
+        """
+        Import historical data.
 
         Returns:
             The cumulative total usage after import, or None if import was skipped.
+
         """
         # Query last statistics
         last_inserted_stat = await get_instance(self.hass).async_add_executor_job(
@@ -117,18 +121,15 @@ class Importer:
         try:
             if not self.is_last_inserted_stat_valid(last_inserted_stat):
                 # Initial import - last 3 years
-                _LOGGER.warning(
-                    "Starting initial import. This may take some time."
-                )
+                _LOGGER.warning("Starting initial import. This may take some time.")
                 return await self._initial_import_statistics()
-            else:
-                # Incremental import
-                start_off_point = self.prepare_start_off_point(last_inserted_stat)
-                if start_off_point is None:
-                    # Return existing sum if no new import needed
-                    return Decimal(last_inserted_stat[self.id][0]["sum"])
-                start, _sum = start_off_point
-                return await self._incremental_import_statistics(start, _sum)
+            # Incremental import
+            start_off_point = self.prepare_start_off_point(last_inserted_stat)
+            if start_off_point is None:
+                # Return existing sum if no new import needed
+                return Decimal(last_inserted_stat[self.id][0]["sum"])
+            start, _sum = start_off_point
+            return await self._incremental_import_statistics(start, _sum)
 
         except TimeoutError as e:
             _LOGGER.warning("Timeout during import: %s", e)
@@ -160,15 +161,16 @@ class Importer:
 
     async def _import_statistics(
         self,
-        start: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         total_usage: Decimal = Decimal(0),
     ) -> Decimal:
-        """Import statistics from Netz NO API.
+        """
+        Import statistics from Netz NO API.
 
         Dispatches to the appropriate import method based on meter type.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if start is None:
             # Default: 3 years of history
@@ -180,7 +182,10 @@ class Importer:
             raise ValueError("start datetime must be timezone-aware!")
 
         _LOGGER.debug(
-            "Importing data from %s to %s (FTM: %s)", start, end, self.has_ftm_meter_data
+            "Importing data from %s to %s (FTM: %s)",
+            start,
+            end,
+            self.has_ftm_meter_data,
         )
         if start > end:
             _LOGGER.warning("Start date is after end date, skipping")
@@ -188,8 +193,7 @@ class Importer:
 
         if self.has_ftm_meter_data:
             return await self._import_ftm_statistics(start, end, total_usage)
-        else:
-            return await self._import_daily_statistics(start, end, total_usage)
+        return await self._import_daily_statistics(start, end, total_usage)
 
     async def _import_ftm_statistics(
         self,
@@ -197,7 +201,8 @@ class Importer:
         end: datetime,
         total_usage: Decimal,
     ) -> Decimal:
-        """Import FTM (15-minute interval) statistics.
+        """
+        Import FTM (15-minute interval) statistics.
 
         Each day returns individual readings (e.g., 96 values for 15-min intervals)
         together with the corresponding timestamps. The API reports the *end* of
@@ -301,7 +306,8 @@ class Importer:
         end: datetime,
         total_usage: Decimal,
     ) -> Decimal:
-        """Import daily meter statistics using the Month endpoint.
+        """
+        Import daily meter statistics using the Month endpoint.
 
         Each day's single consumption value becomes one statistics entry
         assigned to midnight UTC of that day.
@@ -337,14 +343,16 @@ class Importer:
                         if day_date <= start_date or day_date > end_date:
                             continue
                         day_midnight = datetime.combine(
-                            day_date, datetime.min.time(), tzinfo=timezone.utc
+                            day_date, datetime.min.time(), tzinfo=UTC
                         )
                         daily_readings[day_midnight] = Decimal(str(value))
 
             except Exception as e:
                 _LOGGER.debug(
                     "Could not fetch monthly data for %d-%02d: %s",
-                    current_year, current_month, e
+                    current_year,
+                    current_month,
+                    e,
                 )
 
             # Advance to next month

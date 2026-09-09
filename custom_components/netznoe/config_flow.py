@@ -1,6 +1,7 @@
 """Config flow for Netz NO Smartmeter integration."""
+
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -22,10 +23,11 @@ class NetzNoeSmartmeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Netz NO Smartmeter config flow."""
 
     VERSION = 2
-    data: Optional[dict[str, Any]] = None
+    data: dict[str, Any] | None = None
 
     async def validate_auth(self, username: str, password: str) -> dict:
-        """Validate credentials and return metering points.
+        """
+        Validate credentials and return metering points.
 
         Raises ValueError if credentials are invalid.
         """
@@ -38,7 +40,7 @@ class NetzNoeSmartmeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return {"metering_points": metering_points}
 
-    async def async_step_user(self, user_input: Optional[dict[str, Any]] = None):
+    async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Handle user step."""
         errors: dict[str, str] = {}
 
@@ -63,9 +65,7 @@ class NetzNoeSmartmeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 has_any_smart = any(
                     mp.get("smartMeterType") is not None for mp in metering_points
                 )
-                has_any_active = any(
-                    is_meter_active(mp) for mp in metering_points
-                )
+                has_any_active = any(is_meter_active(mp) for mp in metering_points)
 
                 if not has_any_smart:
                     errors["base"] = "no_smartmeter"

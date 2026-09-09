@@ -1,4 +1,5 @@
 """Netz NO Smartmeter sensor platform."""
+
 from datetime import timedelta
 
 from homeassistant import config_entries, core

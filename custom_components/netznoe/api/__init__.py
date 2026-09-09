@@ -1,4 +1,5 @@
 """Netz NO Smartmeter API wrapper."""
+
 from importlib.metadata import version
 
 from .client import Smartmeter
