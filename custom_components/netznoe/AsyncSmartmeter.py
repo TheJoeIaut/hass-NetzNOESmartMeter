@@ -16,8 +16,7 @@ class AsyncSmartmeter:
     """Async wrapper for Netz NO Smartmeter synchronous API."""
 
     def __init__(self, hass: HomeAssistant, smartmeter: Smartmeter):
-        """
-        Initialize the async wrapper.
+        """Initialize the async wrapper.
 
         Args:
             hass: Home Assistant instance
@@ -65,8 +64,7 @@ class AsyncSmartmeter:
     async def get_latest_meter_reading(
         self, meter_id: str | None = None, has_ftm_meter_data: bool = True
     ) -> float | None:
-        """
-        Get the latest meter reading.
+        """Get the latest meter reading.
 
         For FTM meters: tries yesterday first, then day before yesterday.
         For daily meters: fetches current month and returns last non-null value.

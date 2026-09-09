@@ -1,5 +1,7 @@
 """Netz NO Smartmeter API Client."""
 
+from __future__ import annotations
+
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -21,8 +23,7 @@ class Smartmeter:
     """Netz NO Smartmeter client."""
 
     def __init__(self, username: str, password: str):
-        """
-        Initialize the Smartmeter API client.
+        """Initialize the Smartmeter API client.
 
         Args:
             username: Username for Netz NO portal
@@ -67,8 +68,7 @@ class Smartmeter:
             return False
 
     def login(self) -> Smartmeter:
-        """
-        Authenticate with Netz NO API.
+        """Authenticate with Netz NO API.
 
         Returns:
             Self for method chaining
@@ -129,8 +129,7 @@ class Smartmeter:
         query: dict[str, Any] | None = None,
         timeout: float = 60.0,
     ) -> Any:
-        """
-        Make API call to Netz NO endpoint.
+        """Make API call to Netz NO endpoint.
 
         Args:
             endpoint: API endpoint (relative to BASE_URL)
@@ -177,8 +176,7 @@ class Smartmeter:
         return self._metering_point_id
 
     def get_metering_points(self) -> list[dict[str, Any]]:
-        """
-        Get all metering points for the account.
+        """Get all metering points for the account.
 
         Returns:
             List of metering point dictionaries
@@ -187,8 +185,7 @@ class Smartmeter:
         return self._metering_points_cache
 
     def get_account_info(self) -> dict[str, Any]:
-        """
-        Get account information.
+        """Get account information.
 
         Returns:
             Dictionary with account info
@@ -205,8 +202,7 @@ class Smartmeter:
     def get_consumption_day(
         self, day: date, meter_id: str | None = None
     ) -> tuple[list[str], list[float]]:
-        """
-        Get daily consumption data.
+        """Get daily consumption data.
 
         Args:
             day: Date to get consumption for
@@ -242,8 +238,7 @@ class Smartmeter:
     def get_consumption_month(
         self, year: int, month: int, meter_id: str | None = None
     ) -> tuple[list[str], list[float]]:
-        """
-        Get monthly consumption data.
+        """Get monthly consumption data.
 
         Args:
             year: Year
@@ -279,8 +274,7 @@ class Smartmeter:
     def get_consumption_year(
         self, year: int, meter_id: str | None = None
     ) -> tuple[list[str], list[float]]:
-        """
-        Get yearly consumption data.
+        """Get yearly consumption data.
 
         Args:
             year: Year
@@ -316,8 +310,7 @@ class Smartmeter:
         end_date: date | None = None,
         meter_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Get historical consumption data day by day.
+        """Get historical consumption data day by day.
 
         This fetches daily consumption for each day in the range.
 

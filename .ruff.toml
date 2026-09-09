@@ -10,7 +10,10 @@ select = [
 ignore = [
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
     "D203", # no-blank-line-before-class (incompatible with formatter)
-    "D212", # multi-line-summary-first-line (incompatible with formatter)
+    # The blueprint ignores D212, which enforces D213 and pushes every summary
+    # onto a second line. Home Assistant core keeps the summary on the first
+    # line, and so does this codebase, so the pair is swapped here.
+    "D213", # multi-line-summary-second-line
     "COM812", # incompatible with formatter
     "ISC001", # incompatible with formatter
 
@@ -59,6 +62,13 @@ ignore = [
     "TRY300", # try-consider-else
     "TRY400", # error-instead-of-exception
     "TRY401", # verbose-log-message
+]
+
+[lint.per-file-ignores]
+"tests/*" = [
+    "S101", # assert is how pytest expresses expectations
+    "SLF001", # the tests exercise the importer's internals directly
+    "DTZ001", # naive datetimes are the input the API actually sends
 ]
 
 [lint.flake8-pytest-style]

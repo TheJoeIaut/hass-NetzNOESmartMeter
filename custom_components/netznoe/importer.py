@@ -39,8 +39,7 @@ class Importer:
         unit_of_measurement: str,
         has_ftm_meter_data: bool = True,
     ):
-        """
-        Initialize the importer.
+        """Initialize the importer.
 
         Args:
             hass: Home Assistant instance
@@ -100,8 +99,7 @@ class Importer:
         return start, _sum
 
     async def async_import(self) -> Decimal | None:
-        """
-        Import historical data.
+        """Import historical data.
 
         Returns:
             The cumulative total usage after import, or None if import was skipped.
@@ -165,8 +163,7 @@ class Importer:
         end: datetime | None = None,
         total_usage: Decimal = Decimal(0),
     ) -> Decimal:
-        """
-        Import statistics from Netz NO API.
+        """Import statistics from Netz NO API.
 
         Dispatches to the appropriate import method based on meter type.
         """
@@ -201,8 +198,7 @@ class Importer:
         end: datetime,
         total_usage: Decimal,
     ) -> Decimal:
-        """
-        Import FTM (15-minute interval) statistics.
+        """Import FTM (15-minute interval) statistics.
 
         Each day returns individual readings (e.g., 96 values for 15-min intervals)
         together with the corresponding timestamps. The API reports the *end* of
@@ -306,8 +302,7 @@ class Importer:
         end: datetime,
         total_usage: Decimal,
     ) -> Decimal:
-        """
-        Import daily meter statistics using the Month endpoint.
+        """Import daily meter statistics using the Month endpoint.
 
         Each day's single consumption value becomes one statistics entry
         assigned to midnight UTC of that day.

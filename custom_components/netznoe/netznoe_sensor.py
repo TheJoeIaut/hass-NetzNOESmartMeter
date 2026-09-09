@@ -28,8 +28,7 @@ class NetzNoeSensor(SensorEntity):
         async_smartmeter: AsyncSmartmeter,
         metering_point_data: dict,
     ) -> None:
-        """
-        Initialize the sensor.
+        """Initialize the sensor.
 
         Args:
             async_smartmeter: Shared async smartmeter client

@@ -26,8 +26,7 @@ class NetzNoeSmartmeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     data: dict[str, Any] | None = None
 
     async def validate_auth(self, username: str, password: str) -> dict:
-        """
-        Validate credentials and return metering points.
+        """Validate credentials and return metering points.
 
         Raises ValueError if credentials are invalid.
         """
