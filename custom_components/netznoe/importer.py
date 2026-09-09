@@ -215,11 +215,28 @@ class Importer:
                 )
 
                 if values:
+                    if len(times) < len(values):
+                        _LOGGER.warning(
+                            "Netz NO returned %d values but only %d timestamps "
+                            "for %s, skipping the surplus readings",
+                            len(values),
+                            len(times),
+                            current_date,
+                        )
+
+                    # Timestamps arrive in chronological order. When the autumn
+                    # DST change repeats 02:00-03:00 local time, a timestamp
+                    # stops advancing: everything from there on belongs to the
+                    # second pass, which must be marked so both passes do not
+                    # collapse into the same UTC hour.
+                    fold = 0
+                    previous_reading_time = None
+
                     # Aggregate readings to hourly buckets using the actual
                     # timestamps reported by the API.
                     for i, value in enumerate(values):
-                        if value is None or i >= len(times):
-                            continue
+                        if i >= len(times):
+                            break
 
                         reading_time = dt_util.parse_datetime(times[i])
                         if reading_time is None:
@@ -228,7 +245,17 @@ class Importer:
                             # The API reports naive timestamps in Austria local
                             # time, not UTC - localize before converting so DST
                             # offsets (CET/CEST) are applied correctly.
-                            reading_time = reading_time.replace(tzinfo=NETZNOE_TIMEZONE)
+                            if (
+                                previous_reading_time is not None
+                                and reading_time <= previous_reading_time
+                            ):
+                                fold = 1
+                            previous_reading_time = reading_time
+                            reading_time = reading_time.replace(
+                                tzinfo=NETZNOE_TIMEZONE, fold=fold
+                            )
+                        if value is None:
+                            continue
                         reading_time = dt_util.as_utc(reading_time)
 
                         # API time is the end of the interval; subtract 1 minute
