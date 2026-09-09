@@ -19,12 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .AsyncSmartmeter import AsyncSmartmeter
-from .const import (
-    DOMAIN,
-    ENERGY_COMMUNITY_RESYNC_DAYS,
-    STAT_SUFFIX_GRID,
-    STAT_SUFFIX_SELF_COVERAGE,
-)
+from .const import DOMAIN, STAT_SUFFIX_GRID, STAT_SUFFIX_SELF_COVERAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -150,13 +145,10 @@ class Importer:
             totals = {self.id: _sum}
 
             if self.energy_community:
-                # The community split for a day can arrive after that day was
-                # already imported, so recent days are read again and their
-                # statistics rewritten from the totals that preceded them.
-                resync_start = datetime.now(UTC) - timedelta(
-                    days=ENERGY_COMMUNITY_RESYNC_DAYS
-                )
-                start = min(start, resync_start)
+                # The community split for a day arrives after that day was
+                # already imported, so the previous day is read again and its
+                # statistics rewritten from the totals that preceded it.
+                start = min(start, self.previous_day_start(datetime.now(UTC)))
                 totals = await self._running_sums_before(start)
 
             return await self._incremental_import_statistics(start, totals)
@@ -186,6 +178,18 @@ class Importer:
             unit_of_measurement=self.unit_of_measurement,
             has_mean=False,
             has_sum=True,
+        )
+
+    @staticmethod
+    def previous_day_start(now: datetime) -> datetime:
+        """Return the start of the previous day, in UTC.
+
+        Days are counted in the grid's own time zone, since that is how the
+        API groups the readings and publishes the energy community split.
+        """
+        yesterday = now.astimezone(NETZNOE_TIMEZONE) - timedelta(days=1)
+        return dt_util.as_utc(
+            yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
         )
 
     async def _running_sums_before(self, moment: datetime) -> dict[str, Decimal]:

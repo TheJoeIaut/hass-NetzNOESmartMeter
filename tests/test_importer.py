@@ -264,6 +264,20 @@ async def test_no_extra_series_when_energy_community_is_disabled():
     assert list(written) == ["netznoe:at001"]
 
 
+def test_late_update_reaches_back_to_the_start_of_the_previous_day():
+    """The re-read window is yesterday in the grid's own time zone."""
+    # 10:30 CEST on 2026-09-09 is 08:30 UTC; yesterday starts at 00:00 local,
+    # which is 22:00 UTC on the day before that.
+    assert Importer.previous_day_start(utc(2026, 9, 9, 8)) == utc(2026, 9, 7, 22)
+
+    # In winter the offset is one hour, so local midnight is 23:00 UTC.
+    assert Importer.previous_day_start(utc(2026, 1, 15, 8)) == utc(2026, 1, 13, 23)
+
+    # The day the clock goes back is 25 hours long, so the previous day still
+    # starts at the local midnight before it rather than a fixed 24h earlier.
+    assert Importer.previous_day_start(utc(2026, 10, 26, 8)) == utc(2026, 10, 24, 22)
+
+
 def test_energy_community_is_ignored_for_daily_meters():
     """Meters without interval data have no community split to import."""
     importer = Importer(

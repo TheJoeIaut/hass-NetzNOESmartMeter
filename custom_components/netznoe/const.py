@@ -9,11 +9,6 @@ CONF_ENERGY_COMMUNITY = "energy_community"
 STAT_SUFFIX_SELF_COVERAGE = "eigendeckung"
 STAT_SUFFIX_GRID = "restnetzbezug"
 
-# The API publishes a day's energy community split some time after the
-# consumption itself, so recent days are imported again on every run to pick
-# up values that were still missing the first time round.
-ENERGY_COMMUNITY_RESYNC_DAYS = 3
-
 
 def is_meter_active(metering_point_data: dict) -> bool:
     """Check if a specific metering point is an active smart meter."""
