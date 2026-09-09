@@ -1,0 +1,42 @@
+name: Hassfest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  hassfest: # https://developers.home-assistant.io/blog/2020/04/16/hassfest
+    name: Hassfest validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # The action runs the image with `docker run`, which fails outright when
+      # the registry rate limits the pull. Fetching it first, with retries,
+      # keeps a throttled registry from failing the whole run.
+      - name: Pull the hassfest image
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if docker pull ghcr.io/home-assistant/hassfest:latest; then
+              exit 0
+            fi
+            echo "Pull failed (attempt $attempt), retrying in $((attempt * 15))s"
+            sleep $((attempt * 15))
+          done
+          echo "Could not pull the hassfest image"
+          exit 1
+
+      - name: Run hassfest validation
+        uses: home-assistant/actions/hassfest@f4ca6f671bd429efb108c0f2fa0ae8af0215986c # master

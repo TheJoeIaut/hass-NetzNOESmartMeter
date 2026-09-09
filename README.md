@@ -1,9 +1,11 @@
 # NetzNÖ Smartmeter Integration for Home Assistant
 
-![Validate](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/validate.yml/badge.svg)
+![HACS](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/hacs.yml/badge.svg)
+![Hassfest](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/hassfest.yml/badge.svg)
 ![Lint](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/lint.yml/badge.svg)
 ![Test](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/test.yml/badge.svg)
 ![Release](https://github.com/TheJoeIaut/hass-NetzNOESmartMeter/actions/workflows/release.yml/badge.svg)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 
 ## About
 
