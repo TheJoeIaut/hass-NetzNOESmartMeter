@@ -3,9 +3,12 @@
 import calendar
 import logging
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from operator import itemgetter
+from typing import TypeVar
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
@@ -18,10 +21,13 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
+from .api.errors import SmartmeterConnectionError, SmartmeterLoginError
 from .AsyncSmartmeter import AsyncSmartmeter
 from .const import DOMAIN, STAT_SUFFIX_GRID, STAT_SUFFIX_SELF_COVERAGE
 
 _LOGGER = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 # The Netz NO API returns interval timestamps without a UTC offset. They are
 # always in the grid's own local time (Austria), regardless of the Home
@@ -180,6 +186,39 @@ class Importer:
             has_sum=True,
         )
 
+    async def _fetch_with_relogin(
+        self, fetch: Callable[[], Awaitable[_T]], description: str
+    ) -> _T | None:
+        """Fetch one period, re-authenticating once if the session was lost.
+
+        A long import can outlive its session. Every later call then fails
+        without even reaching the API, so without logging back in the rest of
+        the run would be quietly dropped. Returns None if the period could not
+        be read, which the callers count so a truncated import is reported.
+        """
+        try:
+            return await fetch()
+        except (SmartmeterConnectionError, SmartmeterLoginError) as err:
+            _LOGGER.debug(
+                "Session lost while reading %s (%s), logging in again",
+                description,
+                err,
+            )
+        except Exception as err:
+            _LOGGER.debug("Could not fetch data for %s: %s", description, err)
+            return None
+
+        try:
+            await self.async_smartmeter.ensure_logged_in()
+            return await fetch()
+        except Exception as err:
+            _LOGGER.warning(
+                "Could not fetch data for %s even after logging in again: %s",
+                description,
+                err,
+            )
+            return None
+
     @staticmethod
     def previous_day_start(now: datetime) -> datetime:
         """Return the start of the previous day, in UTC.
@@ -289,12 +328,23 @@ class Importer:
         }
         current_date = start.date()
         end_date = end.date()
+        unreadable_days = 0
 
         while current_date <= end_date:
+            consumption = await self._fetch_with_relogin(
+                partial(
+                    self.async_smartmeter.get_consumption_day_series,
+                    current_date,
+                    self.metering_point_id,
+                ),
+                str(current_date),
+            )
+            if consumption is None:
+                unreadable_days += 1
+                current_date += timedelta(days=1)
+                continue
+
             try:
-                consumption = await self.async_smartmeter.get_consumption_day_series(
-                    current_date, self.metering_point_id
-                )
                 times = consumption.times
                 values = consumption.metered
 
@@ -367,9 +417,19 @@ class Importer:
                             hourly_readings[self.id_grid][hour_start] += from_grid
 
             except Exception as e:
-                _LOGGER.debug("Could not fetch data for %s: %s", current_date, e)
+                _LOGGER.debug("Could not process data for %s: %s", current_date, e)
 
             current_date += timedelta(days=1)
+
+        if unreadable_days:
+            _LOGGER.warning(
+                "Could not read %d of the days between %s and %s for %s, "
+                "so this import is incomplete",
+                unreadable_days,
+                start.date(),
+                end_date,
+                self.metering_point_id,
+            )
 
         for statistic_id in self.statistic_ids():
             totals[statistic_id] = self._write_statistics(
@@ -446,12 +506,29 @@ class Importer:
         # Iterate month by month
         current_year = start_date.year
         current_month = start_date.month
+        unreadable_months = 0
 
         while date(current_year, current_month, 1) <= end_date:
+            month = await self._fetch_with_relogin(
+                partial(
+                    self.async_smartmeter.get_consumption_month,
+                    current_year,
+                    current_month,
+                    self.metering_point_id,
+                ),
+                f"{current_year}-{current_month:02d}",
+            )
+            if month is None:
+                unreadable_months += 1
+                if current_month == 12:
+                    current_year += 1
+                    current_month = 1
+                else:
+                    current_month += 1
+                continue
+
             try:
-                times, values = await self.async_smartmeter.get_consumption_month(
-                    current_year, current_month, self.metering_point_id
-                )
+                _times, values = month
 
                 if values:
                     days_in_month = calendar.monthrange(current_year, current_month)[1]
@@ -476,7 +553,7 @@ class Importer:
 
             except Exception as e:
                 _LOGGER.debug(
-                    "Could not fetch monthly data for %d-%02d: %s",
+                    "Could not process monthly data for %d-%02d: %s",
                     current_year,
                     current_month,
                     e,
@@ -488,6 +565,16 @@ class Importer:
                 current_month = 1
             else:
                 current_month += 1
+
+        if unreadable_months:
+            _LOGGER.warning(
+                "Could not read %d of the months between %s and %s for %s, "
+                "so this import is incomplete",
+                unreadable_months,
+                start_date,
+                end_date,
+                self.metering_point_id,
+            )
 
         # Build statistics with daily resolution
         statistics = []

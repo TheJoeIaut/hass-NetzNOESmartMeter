@@ -13,18 +13,30 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from custom_components.netznoe.api import ConsumptionDay
+from custom_components.netznoe.api.errors import SmartmeterConnectionError
 from custom_components.netznoe.importer import Importer
 
 
 class FakeSmartmeter:
     """Return canned consumption data for a set of days."""
 
-    def __init__(self, days: dict) -> None:
+    def __init__(self, days: dict, fail_until_relogin: bool = False) -> None:
         """Store the per-day ConsumptionDay responses."""
         self.days = days
+        self.logged_in = not fail_until_relogin
+        self.logins = 0
+        self.requests = 0
+
+    async def ensure_logged_in(self):
+        """Restore the session the way the real client would."""
+        self.logins += 1
+        self.logged_in = True
 
     async def get_consumption_day_series(self, day, meter_id):  # noqa: ARG002
-        """Return the canned response for a day, or nothing."""
+        """Return the canned response, or fail while logged out."""
+        self.requests += 1
+        if not self.logged_in:
+            raise SmartmeterConnectionError("Not authenticated. Call login() first.")
         return self.days.get(day, ConsumptionDay())
 
 
@@ -262,6 +274,52 @@ async def test_no_extra_series_when_energy_community_is_disabled():
     )
 
     assert list(written) == ["netznoe:at001"]
+
+
+async def test_a_lost_session_is_restored_and_the_day_is_read_again():
+    """Losing the session mid-import logs back in instead of dropping data."""
+    day = datetime(2026, 7, 1).date()
+    smartmeter = FakeSmartmeter(
+        {day: day_data(["2026-07-01T10:15:00"], [0.5])},
+        fail_until_relogin=True,
+    )
+    importer = Importer(MagicMock(), smartmeter, "AT001", "kWh")
+
+    target = "custom_components.netznoe.importer.async_add_external_statistics"
+    with patch(target) as add_statistics:
+        await importer._import_ftm_statistics(
+            utc(2026, 7, 1, 0), utc(2026, 7, 1, 23), {importer.id: Decimal(0)}
+        )
+
+    # The first attempt failed while logged out, so the client logged in again
+    # and the reading still made it into the statistics.
+    assert smartmeter.logins == 1
+    buckets = {e["start"]: e["state"] for e in add_statistics.call_args[0][2]}
+    assert buckets == {utc(2026, 7, 1, 8): pytest.approx(0.5)}
+
+
+async def test_a_day_that_stays_unreadable_is_reported(caplog):
+    """An import that silently loses days says so instead of looking clean."""
+
+    class AlwaysLoggedOut(FakeSmartmeter):
+        async def ensure_logged_in(self):
+            """Fail to recover, the way an outage would."""
+
+    day = datetime(2026, 7, 1).date()
+    smartmeter = AlwaysLoggedOut(
+        {day: day_data(["2026-07-01T10:15:00"], [0.5])},
+        fail_until_relogin=True,
+    )
+    importer = Importer(MagicMock(), smartmeter, "AT001", "kWh")
+
+    target = "custom_components.netznoe.importer.async_add_external_statistics"
+    with patch(target) as add_statistics:
+        await importer._import_ftm_statistics(
+            utc(2026, 7, 1, 0), utc(2026, 7, 1, 23), {importer.id: Decimal(0)}
+        )
+
+    assert not add_statistics.called
+    assert "this import is incomplete" in caplog.text
 
 
 def test_late_update_reaches_back_to_the_start_of_the_previous_day():
