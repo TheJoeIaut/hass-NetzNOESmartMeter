@@ -55,7 +55,7 @@ def day_data(times, metered, grid_leftover=None, self_coverage=None):
     )
 
 
-async def run_series_import(days, start, end, *, energy_community=False):
+async def run_series_import(days, start, end, *, energy_community=False, series=None):
     """Run the FTM import and return {statistic_id: {bucket: usage}}."""
     importer = Importer(
         MagicMock(),
@@ -67,8 +67,8 @@ async def run_series_import(days, start, end, *, energy_community=False):
 
     target = "custom_components.netznoe.importer.async_add_external_statistics"
     with patch(target) as add_statistics:
-        totals = dict.fromkeys(importer.statistic_ids(), Decimal(0))
-        await importer._import_ftm_statistics(start, end, totals)
+        totals = dict.fromkeys(series or importer.statistic_ids(), Decimal(0))
+        await importer._import_ftm_statistics(start, end, totals, series)
 
     written = {}
     for call in add_statistics.call_args_list:
@@ -334,6 +334,31 @@ def test_late_update_reaches_back_to_the_start_of_the_previous_day():
     # The day the clock goes back is 25 hours long, so the previous day still
     # starts at the local midnight before it rather than a fixed 24h earlier.
     assert Importer.previous_day_start(utc(2026, 10, 26, 8)) == utc(2026, 10, 24, 22)
+
+
+async def test_a_series_can_be_filled_in_without_rewriting_the_others():
+    """Switching the split on later backfills it, leaving the total alone."""
+    day = datetime(2026, 7, 1).date()
+    written = await run_series_import(
+        {
+            day: day_data(
+                ["2026-07-01T10:15:00"],
+                metered=[0.5],
+                grid_leftover=[0.3],
+                self_coverage=[0.2],
+            )
+        },
+        start=utc(2026, 6, 30, 0),
+        end=utc(2026, 7, 2, 0),
+        energy_community=True,
+        series=["netznoe:at001_eigendeckung", "netznoe:at001_restnetzbezug"],
+    )
+
+    # The total already had history, so only the two new series are written.
+    assert set(written) == {"netznoe:at001_eigendeckung", "netznoe:at001_restnetzbezug"}
+    bucket = utc(2026, 7, 1, 8)
+    assert written["netznoe:at001_eigendeckung"][bucket] == pytest.approx(0.2)
+    assert written["netznoe:at001_restnetzbezug"][bucket] == pytest.approx(0.3)
 
 
 def test_energy_community_is_ignored_for_daily_meters():

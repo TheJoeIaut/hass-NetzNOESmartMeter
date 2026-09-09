@@ -119,6 +119,25 @@ class Importer:
 
         return start, _sum
 
+    async def _last_statistics(self, statistic_id: str) -> dict:
+        """Return the most recent statistic written for one series."""
+        return await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics,
+            self.hass,
+            1,
+            statistic_id,
+            True,
+            {"sum", "state"},
+        )
+
+    async def _series_without_statistics(self) -> list[str]:
+        """Return the maintained series that hold no statistics yet."""
+        written = {
+            statistic_id: (await self._last_statistics(statistic_id)).get(statistic_id)
+            for statistic_id in self.statistic_ids()
+        }
+        return [statistic_id for statistic_id, rows in written.items() if not rows]
+
     async def async_import(self) -> Decimal | None:
         """Import historical data.
 
@@ -127,14 +146,7 @@ class Importer:
 
         """
         # Query last statistics
-        last_inserted_stat = await get_instance(self.hass).async_add_executor_job(
-            get_last_statistics,
-            self.hass,
-            1,
-            self.id,
-            True,
-            {"sum", "state"},
-        )
+        last_inserted_stat = await self._last_statistics(self.id)
         _LOGGER.debug("Last inserted stat: %s", last_inserted_stat)
 
         try:
@@ -142,6 +154,20 @@ class Importer:
                 # Initial import - last 3 years
                 _LOGGER.warning("Starting initial import. This may take some time.")
                 return await self._initial_import_statistics()
+
+            # A series can be added to a meter that already has history, which
+            # is what happens when the energy community option is switched on
+            # later. Reading only the recent window would leave it starting
+            # from nothing, so it is filled in over the whole history first.
+            missing = await self._series_without_statistics()
+            if missing:
+                _LOGGER.warning(
+                    "No statistics yet for %s, importing the full history so the "
+                    "series covers the same period as the total",
+                    ", ".join(missing),
+                )
+                await self._import_statistics(series=missing)
+
             # Incremental import
             start_off_point = self.prepare_start_off_point(last_inserted_stat)
             if start_off_point is None:
@@ -273,14 +299,18 @@ class Importer:
         start: datetime | None = None,
         end: datetime | None = None,
         totals: dict[str, Decimal] | None = None,
+        series: list[str] | None = None,
     ) -> Decimal:
         """Import statistics from Netz NO API.
 
         Dispatches to the appropriate import method based on meter type.
+        `series` limits which of the maintained series are written, so one can
+        be filled in without rewriting the others.
         """
         now = datetime.now(UTC)
+        series = series or self.statistic_ids()
         totals = dict(totals or {})
-        for statistic_id in self.statistic_ids():
+        for statistic_id in series:
             totals.setdefault(statistic_id, Decimal(0))
 
         if start is None:
@@ -301,17 +331,20 @@ class Importer:
         )
         if start > end:
             _LOGGER.warning("Start date is after end date, skipping")
-            return totals[self.id]
+            return totals.get(self.id, Decimal(0))
 
         if self.has_ftm_meter_data:
-            return await self._import_ftm_statistics(start, end, totals)
-        return await self._import_daily_statistics(start, end, totals[self.id])
+            return await self._import_ftm_statistics(start, end, totals, series)
+        return await self._import_daily_statistics(
+            start, end, totals.get(self.id, Decimal(0))
+        )
 
     async def _import_ftm_statistics(
         self,
         start: datetime,
         end: datetime,
         totals: dict[str, Decimal],
+        series: list[str] | None = None,
     ) -> Decimal:
         """Import FTM (15-minute interval) statistics.
 
@@ -323,8 +356,9 @@ class Importer:
         For energy community members the total is additionally split into the
         share covered by the community and the remainder taken from the grid.
         """
+        series = series or self.statistic_ids()
         hourly_readings: dict[str, defaultdict[datetime, Decimal]] = {
-            statistic_id: defaultdict(Decimal) for statistic_id in self.statistic_ids()
+            statistic_id: defaultdict(Decimal) for statistic_id in series
         }
         current_date = start.date()
         end_date = end.date()
@@ -345,77 +379,7 @@ class Importer:
                 continue
 
             try:
-                times = consumption.times
-                values = consumption.metered
-
-                if values:
-                    if len(times) < len(values):
-                        _LOGGER.warning(
-                            "Netz NO returned %d values but only %d timestamps "
-                            "for %s, skipping the surplus readings",
-                            len(values),
-                            len(times),
-                            current_date,
-                        )
-
-                    # Timestamps arrive in chronological order. When the autumn
-                    # DST change repeats 02:00-03:00 local time, a timestamp
-                    # stops advancing: everything from there on belongs to the
-                    # second pass, which must be marked so both passes do not
-                    # collapse into the same UTC hour.
-                    fold = 0
-                    previous_reading_time = None
-
-                    # Aggregate readings to hourly buckets using the actual
-                    # timestamps reported by the API.
-                    for i, value in enumerate(values):
-                        if i >= len(times):
-                            break
-
-                        reading_time = dt_util.parse_datetime(times[i])
-                        if reading_time is None:
-                            continue
-                        if reading_time.tzinfo is None:
-                            # The API reports naive timestamps in Austria local
-                            # time, not UTC - localize before converting so DST
-                            # offsets (CET/CEST) are applied correctly.
-                            if (
-                                previous_reading_time is not None
-                                and reading_time <= previous_reading_time
-                            ):
-                                fold = 1
-                            previous_reading_time = reading_time
-                            reading_time = reading_time.replace(
-                                tzinfo=NETZNOE_TIMEZONE, fold=fold
-                            )
-                        if value is None:
-                            continue
-                        reading_time = dt_util.as_utc(reading_time)
-
-                        # API time is the end of the interval; subtract 1 minute
-                        # before flooring to the hour so the reading is attributed
-                        # to the hour it actually occurred in.
-                        hour_start = (reading_time - timedelta(minutes=1)).replace(
-                            minute=0, second=0, microsecond=0
-                        )
-                        # Skip hours already imported (start = end of last stat)
-                        if hour_start < start:
-                            continue
-
-                        usage = Decimal(str(value))
-                        hourly_readings[self.id][hour_start] += usage
-
-                        if self.energy_community:
-                            self_covered, from_grid = self._split_energy_community(
-                                usage,
-                                consumption.self_coverage_at(i),
-                                consumption.grid_leftover_at(i),
-                            )
-                            hourly_readings[self.id_self_coverage][hour_start] += (
-                                self_covered
-                            )
-                            hourly_readings[self.id_grid][hour_start] += from_grid
-
+                self._aggregate_day(consumption, current_date, start, hourly_readings)
             except Exception as e:
                 _LOGGER.debug("Could not process data for %s: %s", current_date, e)
 
@@ -431,13 +395,89 @@ class Importer:
                 self.metering_point_id,
             )
 
-        for statistic_id in self.statistic_ids():
+        for statistic_id in series:
             totals[statistic_id] = self._write_statistics(
                 statistic_id, hourly_readings[statistic_id], totals[statistic_id]
             )
 
-        self.last_totals = dict(totals)
-        return totals[self.id]
+        self.last_totals.update(totals)
+        return totals.get(self.id, Decimal(0))
+
+    def _aggregate_day(
+        self,
+        consumption,
+        day: date,
+        start: datetime,
+        hourly_readings: dict[str, defaultdict[datetime, Decimal]],
+    ) -> None:
+        """Add one day's readings to the hourly buckets of each series."""
+        times = consumption.times
+        values = consumption.metered
+        if not values:
+            return
+
+        if len(times) < len(values):
+            _LOGGER.warning(
+                "Netz NO returned %d values but only %d timestamps for %s, "
+                "skipping the surplus readings",
+                len(values),
+                len(times),
+                day,
+            )
+
+        # Timestamps arrive in chronological order. When the autumn DST change
+        # repeats 02:00-03:00 local time, a timestamp stops advancing:
+        # everything from there on belongs to the second pass, which must be
+        # marked so both passes do not collapse into the same UTC hour.
+        fold = 0
+        previous_reading_time = None
+
+        for i, value in enumerate(values):
+            if i >= len(times):
+                break
+
+            reading_time = dt_util.parse_datetime(times[i])
+            if reading_time is None:
+                continue
+            if reading_time.tzinfo is None:
+                # The API reports naive timestamps in Austria local time, not
+                # UTC - localize before converting so DST offsets (CET/CEST)
+                # are applied correctly.
+                if (
+                    previous_reading_time is not None
+                    and reading_time <= previous_reading_time
+                ):
+                    fold = 1
+                previous_reading_time = reading_time
+                reading_time = reading_time.replace(tzinfo=NETZNOE_TIMEZONE, fold=fold)
+            if value is None:
+                continue
+            reading_time = dt_util.as_utc(reading_time)
+
+            # API time is the end of the interval; subtract 1 minute before
+            # flooring to the hour so the reading is attributed to the hour it
+            # actually occurred in.
+            hour_start = (reading_time - timedelta(minutes=1)).replace(
+                minute=0, second=0, microsecond=0
+            )
+            # Skip hours already imported (start = end of last stat)
+            if hour_start < start:
+                continue
+
+            usage = Decimal(str(value))
+            if self.id in hourly_readings:
+                hourly_readings[self.id][hour_start] += usage
+
+            if self.energy_community:
+                self_covered, from_grid = self._split_energy_community(
+                    usage,
+                    consumption.self_coverage_at(i),
+                    consumption.grid_leftover_at(i),
+                )
+                if self.id_self_coverage in hourly_readings:
+                    hourly_readings[self.id_self_coverage][hour_start] += self_covered
+                if self.id_grid in hourly_readings:
+                    hourly_readings[self.id_grid][hour_start] += from_grid
 
     @staticmethod
     def _split_energy_community(
