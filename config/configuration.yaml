@@ -1,0 +1,15 @@
+# https://www.home-assistant.io/integrations/default_config/
+default_config:
+
+# https://www.home-assistant.io/integrations/homeassistant/
+homeassistant:
+  debug: true
+  # The Netz NO API reports its interval timestamps in Austrian local time,
+  # so run the development instance in that time zone as well.
+  time_zone: Europe/Vienna
+
+# https://www.home-assistant.io/integrations/logger/
+logger:
+  default: info
+  logs:
+    custom_components.netznoe: debug

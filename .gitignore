@@ -1,10 +1,22 @@
+# artifacts
 node_modules/
 **/__pycache__
+.pytest*
+*.egg-info
+*/build/*
+*/dist/*
 venv/
+
+# misc
 .claude/
 .idea/
+.vscode
 .coverage
-.pytest_cache
+.ruff_cache
 htmlcov
 coverage.lcov
 coverage.xml
+
+# Home Assistant configuration
+config/*
+!config/configuration.yaml
