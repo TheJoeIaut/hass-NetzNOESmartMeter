@@ -52,6 +52,14 @@ It in turn builds on the excellent [Wiener Netze Smartmeter](https://github.com/
 integration by [DarwinsBuddy](https://github.com/DarwinsBuddy) and contributors,
 which served as the foundation for the Netz NÖ adaptation.
 
+### License
+
+This fork includes code originally published without an explicit license. The
+modifications and new files added here are licensed under the
+[MIT License](LICENSE); see [NOTICE](NOTICE) for the scope. If you are the
+original author and prefer a different license or no redistribution, please
+open an issue.
+
 ## Installation
 
 ### Manual

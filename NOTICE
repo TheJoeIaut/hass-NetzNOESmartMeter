@@ -1,0 +1,14 @@
+Scope of the license
+====================
+
+This fork includes code originally published without an explicit license.
+
+My modifications and new files are licensed under the MIT License, as stated
+in LICENSE.
+
+If you are the original author and prefer a different license or no
+redistribution, please open an issue.
+
+The upstream project is https://github.com/TobiKr/hass-NetzNOESmartMeter by
+TobiKr, which in turn builds on
+https://github.com/DarwinsBuddy/WienerNetzeSmartmeter by DarwinsBuddy.
