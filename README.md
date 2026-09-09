@@ -98,14 +98,13 @@ See [Example configuration files](example/configuration.yaml)
 
 ## Changes in this fork
 
-- **Fixed a timezone offset in the statistics import.** The importer ignored the
-  timestamps the API returns and rebuilt them from the reading's position in the
-  day, treating them as UTC. The API reports them in Austrian local time, so
-  every reading landed one or two hours off in the energy dashboard depending on
-  daylight saving time. It now uses the reported timestamps and localizes them,
-  including the repeated hour when the clock goes back in autumn. Readings are
-  also attributed to the hour they actually cover, since the API timestamps mark
-  the *end* of an interval.
+- **Fixed a timestamp offset in the statistics import.** The importer ignored
+  the timestamps the API returns and rebuilt them from each reading's position
+  in the day, starting at midnight UTC. A day's readings actually begin at
+  22:15 UTC on the previous day, so everything landed about two hours late in
+  the energy dashboard. It now uses the timestamps the API reports, which are
+  UTC despite carrying no offset, and attributes each reading to the hour it
+  actually covers, since an API timestamp marks the *end* of its interval.
 - **Added Energiegemeinschaft support**, described above.
 - **Sync every hour instead of once a day.** The importer refused to query again
   until 24 hours had passed, which left near real time devices such as a
@@ -126,6 +125,6 @@ layout. Open it in VS Code and reopen in the dev container, then:
 - `scripts/lint` formats and lints with ruff
 - `pytest` runs the test suite
 
-Note that the API reports its timestamps in Austrian local time, so the
-development configuration sets `time_zone: Europe/Vienna`. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Note that the API reports its timestamps in UTC without an offset, even though
+the portal shows them in Austrian local time; a day runs from 22:15 on the
+previous day to 22:00. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.

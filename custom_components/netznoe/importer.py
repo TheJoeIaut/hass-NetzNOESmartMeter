@@ -9,7 +9,6 @@ from decimal import Decimal
 from functools import partial
 from operator import itemgetter
 from typing import TypeVar
-from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
@@ -29,10 +28,12 @@ _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
-# The Netz NO API returns interval timestamps without a UTC offset. They are
-# always in the grid's own local time (Austria), regardless of the Home
-# Assistant instance's configured time zone.
-NETZNOE_TIMEZONE = ZoneInfo("Europe/Vienna")
+# The Netz NO API returns interval timestamps without a UTC offset, and they
+# are UTC. Verified against the portal: the reading the portal lists under
+# 05.09.2026 00:15 local arrives from the API as 2026-09-04T22:15:00, which is
+# the same instant two hours earlier, and a day's readings run from 22:15 on
+# the previous day to 22:00 on the day itself.
+NETZNOE_TIMEZONE = UTC
 
 
 class Importer:
@@ -249,13 +250,11 @@ class Importer:
     def previous_day_start(now: datetime) -> datetime:
         """Return the start of the previous day, in UTC.
 
-        Days are counted in the grid's own time zone, since that is how the
-        API groups the readings and publishes the energy community split.
+        The API groups readings into UTC days, so the window that has to be
+        read again for a late energy community split is counted the same way.
         """
-        yesterday = now.astimezone(NETZNOE_TIMEZONE) - timedelta(days=1)
-        return dt_util.as_utc(
-            yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-        )
+        yesterday = now.astimezone(UTC) - timedelta(days=1)
+        return yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
 
     async def _running_sums_before(self, moment: datetime) -> dict[str, Decimal]:
         """Return each series' cumulative sum as of just before a moment.
@@ -425,13 +424,6 @@ class Importer:
                 day,
             )
 
-        # Timestamps arrive in chronological order. When the autumn DST change
-        # repeats 02:00-03:00 local time, a timestamp stops advancing:
-        # everything from there on belongs to the second pass, which must be
-        # marked so both passes do not collapse into the same UTC hour.
-        fold = 0
-        previous_reading_time = None
-
         for i, value in enumerate(values):
             if i >= len(times):
                 break
@@ -440,16 +432,9 @@ class Importer:
             if reading_time is None:
                 continue
             if reading_time.tzinfo is None:
-                # The API reports naive timestamps in Austria local time, not
-                # UTC - localize before converting so DST offsets (CET/CEST)
-                # are applied correctly.
-                if (
-                    previous_reading_time is not None
-                    and reading_time <= previous_reading_time
-                ):
-                    fold = 1
-                previous_reading_time = reading_time
-                reading_time = reading_time.replace(tzinfo=NETZNOE_TIMEZONE, fold=fold)
+                # The timestamps carry no offset and are already UTC, so they
+                # are stamped as such rather than being converted.
+                reading_time = reading_time.replace(tzinfo=NETZNOE_TIMEZONE)
             if value is None:
                 continue
             reading_time = dt_util.as_utc(reading_time)

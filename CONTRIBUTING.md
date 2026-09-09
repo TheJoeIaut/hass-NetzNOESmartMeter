@@ -59,7 +59,8 @@ Assistant instance running, already configured with the included
 
 Run `scripts/develop` to start that instance on port 8123.
 
-Note that the Netz NÖ API reports its interval timestamps in Austrian local
-time, so the development configuration sets `time_zone: Europe/Vienna`. Keep
-that in mind when working on the statistics importer, since a wrong time zone
-shifts every reading into the wrong hour of the energy dashboard.
+Note that the Netz NÖ API reports its interval timestamps in UTC, without an
+offset, even though the portal displays them in Austrian local time. A day's
+readings run from 22:15 on the previous day to 22:00 on the day itself. Keep
+that in mind when working on the statistics importer, since reading them as
+local time shifts every value into the wrong hour of the energy dashboard.

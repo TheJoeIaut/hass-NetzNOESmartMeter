@@ -1,9 +1,11 @@
 """Tests for the Netz NO statistics importer.
 
 The Netz NO API reports the *end* of each 15 minute interval as a timestamp
-without a UTC offset, in Austrian local time. Getting that wrong shifts every
-reading into the wrong hour of the energy dashboard, so the mapping from an
-API timestamp to a Home Assistant hourly bucket is what these tests pin down.
+without a UTC offset. Those timestamps are UTC: the reading the portal lists
+under 05.09.2026 00:15 local arrives as 2026-09-04T22:15:00. Getting that
+wrong shifts every reading into the wrong hour of the energy dashboard, so the
+mapping from an API timestamp to a Home Assistant hourly bucket is what these
+tests pin down.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -96,29 +98,38 @@ async def single_reading(day, timestamp, value=1.0):
     return next(iter(buckets))
 
 
-async def test_summer_timestamp_is_read_as_local_time():
-    """A CEST reading lands two hours earlier in UTC, not at face value."""
+async def test_timestamps_are_taken_as_utc():
+    """An offset free timestamp is the UTC instant, not a local wall clock."""
     bucket = await single_reading(datetime(2026, 7, 1).date(), "2026-07-01T12:15:00")
 
-    # 12:15 CEST is 10:15 UTC, so the reading belongs to the 10:00 UTC hour.
-    # Treating the naive timestamp as UTC would have put it at 12:00.
-    assert bucket == utc(2026, 7, 1, 10)
+    assert bucket == utc(2026, 7, 1, 12)
 
 
-async def test_winter_timestamp_uses_the_standard_time_offset():
-    """The same wall clock time in CET is only one hour ahead of UTC."""
+async def test_the_reading_the_portal_shows_at_local_midnight():
+    """Pin the mapping that was checked against the portal.
+
+    The portal lists this reading under 05.09.2026 00:15 local time, and the
+    API returns it as 2026-09-04T22:15:00, so it belongs to the 22:00 UTC hour
+    of the previous day.
+    """
+    bucket = await single_reading(datetime(2026, 9, 4).date(), "2026-09-04T22:15:00")
+
+    assert bucket == utc(2026, 9, 4, 22)
+
+
+async def test_no_seasonal_shift_is_applied():
+    """A winter timestamp is read exactly like a summer one."""
     bucket = await single_reading(datetime(2026, 1, 15).date(), "2026-01-15T12:15:00")
 
-    assert bucket == utc(2026, 1, 15, 11)
+    assert bucket == utc(2026, 1, 15, 12)
 
 
 async def test_interval_end_is_attributed_to_the_hour_it_covers():
     """A timestamp on the hour closes the previous interval, not the next one."""
     bucket = await single_reading(datetime(2026, 7, 1).date(), "2026-07-01T23:00:00")
 
-    # 23:00 local ends the 22:45-23:00 interval, which belongs to the 22:00
-    # local hour, i.e. 20:00 UTC.
-    assert bucket == utc(2026, 7, 1, 20)
+    # 23:00 ends the 22:45-23:00 interval, so it belongs to the 22:00 hour.
+    assert bucket == utc(2026, 7, 1, 22)
 
 
 async def test_quarter_hours_are_summed_into_one_bucket():
@@ -136,37 +147,36 @@ async def test_quarter_hours_are_summed_into_one_bucket():
         end=utc(2026, 7, 2, 0),
     )
 
-    # All four cover 10:00-11:00 local time, which is the 08:00 UTC hour.
-    assert buckets == {utc(2026, 7, 1, 8): pytest.approx(1.0)}
+    # All four cover the 10:00-11:00 UTC hour.
+    assert buckets == {utc(2026, 7, 1, 10): pytest.approx(1.0)}
 
 
-async def test_autumn_dst_change_keeps_the_repeated_hour_apart():
-    """The hour that occurs twice must not collapse into one bucket."""
+async def test_the_day_of_a_dst_change_is_not_shifted():
+    """A clock change in Austria does not move the readings.
+
+    The timestamps are UTC, which has no daylight saving time, so the day the
+    local clock goes back is imported exactly like any other. Each hour arrives
+    once, and nothing needs disambiguating.
+    """
     day = datetime(2026, 10, 25).date()
-    # On 2026-10-25 the clock goes back from 03:00 CEST to 02:00 CET, so the
-    # local times 02:15 through 03:00 are reported twice.
     times = [
-        "2026-10-25T02:15:00",
-        "2026-10-25T02:30:00",
-        "2026-10-25T02:45:00",
-        "2026-10-25T03:00:00",
-        "2026-10-25T02:15:00",
-        "2026-10-25T02:30:00",
-        "2026-10-25T02:45:00",
-        "2026-10-25T03:00:00",
+        "2026-10-25T00:15:00",
+        "2026-10-25T00:30:00",
+        "2026-10-25T00:45:00",
+        "2026-10-25T01:00:00",
+        "2026-10-25T01:15:00",
     ]
-    values = [0.1, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2, 0.2]
+    values = [0.1, 0.1, 0.1, 0.1, 0.2]
     buckets = await run_import(
         {day: day_data(times, values)},
         start=utc(2026, 10, 24, 0),
         end=utc(2026, 10, 26, 0),
     )
 
-    # The first pass is CEST (UTC+2) and the second is CET (UTC+1), so they
-    # occupy different UTC hours. Without disambiguating the repeated hour both
-    # passes would land in 00:00 UTC and 01:00 UTC would be missing entirely.
-    assert utc(2026, 10, 25, 0) in buckets
-    assert utc(2026, 10, 25, 1) in buckets
+    assert buckets == {
+        utc(2026, 10, 25, 0): pytest.approx(0.4),
+        utc(2026, 10, 25, 1): pytest.approx(0.2),
+    }
     assert sum(buckets.values()) == pytest.approx(sum(values))
 
 
@@ -180,8 +190,8 @@ async def test_readings_before_the_start_are_skipped():
         end=utc(2026, 7, 2, 0),
     )
 
-    # 10:15 local is 08:00 UTC, before the start; 14:15 local is the 12:00 hour.
-    assert buckets == {utc(2026, 7, 1, 12): pytest.approx(0.7)}
+    # 10:15 is before the start; 14:15 belongs to the 14:00 hour.
+    assert buckets == {utc(2026, 7, 1, 14): pytest.approx(0.7)}
 
 
 async def test_surplus_values_without_timestamps_are_ignored():
@@ -193,7 +203,7 @@ async def test_surplus_values_without_timestamps_are_ignored():
         end=utc(2026, 7, 2, 0),
     )
 
-    assert buckets == {utc(2026, 7, 1, 8): pytest.approx(0.5)}
+    assert buckets == {utc(2026, 7, 1, 10): pytest.approx(0.5)}
 
 
 async def test_energy_community_split_is_written_to_separate_series():
@@ -214,7 +224,7 @@ async def test_energy_community_split_is_written_to_separate_series():
         energy_community=True,
     )
 
-    bucket = utc(2026, 7, 1, 8)
+    bucket = utc(2026, 7, 1, 10)
     assert written["netznoe:at001"][bucket] == pytest.approx(0.102)
     assert written["netznoe:at001_eigendeckung"][bucket] == pytest.approx(0.002714)
     assert written["netznoe:at001_restnetzbezug"][bucket] == pytest.approx(0.099286)
@@ -230,7 +240,7 @@ async def test_grid_series_carries_the_full_usage_until_the_split_arrives():
         energy_community=True,
     )
 
-    bucket = utc(2026, 7, 1, 8)
+    bucket = utc(2026, 7, 1, 10)
     assert written["netznoe:at001"][bucket] == pytest.approx(0.4)
     assert written["netznoe:at001_restnetzbezug"][bucket] == pytest.approx(0.4)
     assert written["netznoe:at001_eigendeckung"][bucket] == pytest.approx(0.0)
@@ -252,7 +262,7 @@ async def test_missing_grid_value_is_derived_from_the_community_share():
         energy_community=True,
     )
 
-    bucket = utc(2026, 7, 1, 8)
+    bucket = utc(2026, 7, 1, 10)
     assert written["netznoe:at001_eigendeckung"][bucket] == pytest.approx(0.2)
     assert written["netznoe:at001_restnetzbezug"][bucket] == pytest.approx(0.3)
 
@@ -295,7 +305,7 @@ async def test_a_lost_session_is_restored_and_the_day_is_read_again():
     # and the reading still made it into the statistics.
     assert smartmeter.logins == 1
     buckets = {e["start"]: e["state"] for e in add_statistics.call_args[0][2]}
-    assert buckets == {utc(2026, 7, 1, 8): pytest.approx(0.5)}
+    assert buckets == {utc(2026, 7, 1, 10): pytest.approx(0.5)}
 
 
 async def test_a_day_that_stays_unreadable_is_reported(caplog):
@@ -323,17 +333,9 @@ async def test_a_day_that_stays_unreadable_is_reported(caplog):
 
 
 def test_late_update_reaches_back_to_the_start_of_the_previous_day():
-    """The re-read window is yesterday in the grid's own time zone."""
-    # 10:30 CEST on 2026-09-09 is 08:30 UTC; yesterday starts at 00:00 local,
-    # which is 22:00 UTC on the day before that.
-    assert Importer.previous_day_start(utc(2026, 9, 9, 8)) == utc(2026, 9, 7, 22)
-
-    # In winter the offset is one hour, so local midnight is 23:00 UTC.
-    assert Importer.previous_day_start(utc(2026, 1, 15, 8)) == utc(2026, 1, 13, 23)
-
-    # The day the clock goes back is 25 hours long, so the previous day still
-    # starts at the local midnight before it rather than a fixed 24h earlier.
-    assert Importer.previous_day_start(utc(2026, 10, 26, 8)) == utc(2026, 10, 24, 22)
+    """The re-read window is the previous UTC day, matching the API's days."""
+    assert Importer.previous_day_start(utc(2026, 9, 9, 8)) == utc(2026, 9, 8, 0)
+    assert Importer.previous_day_start(utc(2026, 1, 15, 8)) == utc(2026, 1, 14, 0)
 
 
 async def test_a_series_can_be_filled_in_without_rewriting_the_others():
@@ -356,7 +358,7 @@ async def test_a_series_can_be_filled_in_without_rewriting_the_others():
 
     # The total already had history, so only the two new series are written.
     assert set(written) == {"netznoe:at001_eigendeckung", "netznoe:at001_restnetzbezug"}
-    bucket = utc(2026, 7, 1, 8)
+    bucket = utc(2026, 7, 1, 10)
     assert written["netznoe:at001_eigendeckung"][bucket] == pytest.approx(0.2)
     assert written["netznoe:at001_restnetzbezug"][bucket] == pytest.approx(0.3)
 
