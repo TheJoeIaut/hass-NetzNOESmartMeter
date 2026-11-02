@@ -11,7 +11,11 @@ from operator import itemgetter
 from typing import TypeVar
 
 from homeassistant.components.recorder import get_instance
-from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
+from homeassistant.components.recorder.models import (
+    StatisticData,
+    StatisticMeanType,
+    StatisticMetaData,
+)
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
@@ -19,6 +23,7 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import EnergyConverter
 
 from .api.errors import SmartmeterConnectionError, SmartmeterLoginError
 from .AsyncSmartmeter import AsyncSmartmeter
@@ -209,7 +214,10 @@ class Importer:
             statistic_id=statistic_id,
             name=name,
             unit_of_measurement=self.unit_of_measurement,
-            has_mean=False,
+            # Home Assistant 2026.11 requires mean_type and unit_class; the
+            # old has_mean flag is no longer accepted.
+            mean_type=StatisticMeanType.NONE,
+            unit_class=EnergyConverter.UNIT_CLASS,
             has_sum=True,
         )
 
